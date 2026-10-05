@@ -1,0 +1,21 @@
+[project]
+name = "store-resource-bootstrap-py"
+version = "0.1.0"
+description = "Optional resource bootstrap plugin for common-store: registers the three resource schemas, wires the host resource capability (providers / url / sign) and produces the store-api fileResolver seam, for py-store hosts"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["py-store", "resource", "bootstrap", "provider", "skin"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
