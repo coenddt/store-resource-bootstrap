@@ -1,8 +1,8 @@
 {
   "comment": "双端一致性用例：同一份 JSON，node:test 与 pytest 各自加载执行。双端命名差异以 {node, py} 表达；本文件不复制实现常量（三 schema 除外——其为唯一事实源的镜像）。",
   "facades": {
-    "node": ["has", "register", "configureResource", "resourceOpen", "queryOne", "resourcePut"],
-    "py": ["has", "register", "configure_resource", "resource_open", "query_one", "resource_put"]
+    "node": ["has", "register", "configureResource", "resourceOpen", "queryOne", "resourcePut", "registerProvider"],
+    "py": ["has", "register", "configure_resource", "resource_open", "query_one", "resource_put", "register_provider"]
   },
   "expect_error_class": { "node": "Error", "py": "ValueError" },
   "schemas": {
@@ -80,7 +80,7 @@
           "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
         }]
       ],
-      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [] }
+      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [], "providerRegistered": [] }
     },
     "idempotent": {
       "opts": { "providers": [ { "kind": "local" } ] },
@@ -93,7 +93,7 @@
           "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
         }]
       ],
-      "expected_return": { "registered": [], "skipped": ["Resource", "ResourceLocation", "ResourceBinding"] }
+      "expected_return": { "registered": [], "skipped": ["Resource", "ResourceLocation", "ResourceBinding"], "providerRegistered": [] }
     },
     "defaults": {
       "opts": { "providers": [ { "kind": "local" } ] },
@@ -109,7 +109,27 @@
           "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
         }]
       ],
-      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [] }
+      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [], "providerRegistered": [] }
+    },
+    "provider_plugins": {
+      "opts": {
+        "providers": [ { "kind": "local" } ],
+        "providerPlugins": [ { "kind": "oss" }, { "kind": "minio" } ]
+      },
+      "seed": [],
+      "expected_registered_kinds": ["oss", "minio"],
+      "expected_return_rest": {
+        "registered": ["Resource", "ResourceLocation", "ResourceBinding"],
+        "skipped": []
+      },
+      "expected_tail_calls": [
+        ["configureResource", {
+          "providers": [ { "kind": "local" } ],
+          "url": {},
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
+        }]
+      ]
     },
     "invalid": [
       { "name": "unknown_key",            "opts": { "providers": [ { "kind": "local" } ], "foo": 1 },           "error_contains": "foo",      "expected_call_count": 0 },
@@ -120,7 +140,11 @@
       { "name": "bad_priority",           "opts": { "providers": [ { "kind": "local", "priority": 1.5 } ] },       "error_contains": "priority",  "expected_call_count": 0 },
       { "name": "bad_url",                "opts": { "providers": [ { "kind": "local" } ], "url": 1 },              "error_contains": "url",       "expected_call_count": 0 },
       { "name": "bad_sign",               "opts": { "providers": [ { "kind": "local" } ], "sign": "x" },           "error_contains": "sign",      "expected_call_count": 0 },
-      { "name": "bad_schema",             "opts": { "providers": [ { "kind": "local" } ], "schema": 1 },           "error_contains": "schema",    "expected_call_count": 0 }
+      { "name": "bad_schema",             "opts": { "providers": [ { "kind": "local" } ], "schema": 1 },           "error_contains": "schema",    "expected_call_count": 0 },
+      { "name": "provider_plugins_not_array", "opts": { "providers": [ { "kind": "local" } ], "providerPlugins": 1 },                          "error_contains": "providerPlugins", "expected_call_count": 0 },
+      { "name": "provider_plugins_bad_item",  "opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ 1 ] },                        "error_contains": "providerPlugins", "expected_call_count": 0 },
+      { "name": "provider_plugins_bad_kind",  "opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ { "kind": "" } ] },           "error_contains": "kind",            "expected_call_count": 0 },
+      { "name": "provider_plugins_bad_create","opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ { "kind": "oss", "create": "x" } ] }, "error_contains": "create",  "expected_call_count": 0 }
     ]
   },
   "adapter": {
