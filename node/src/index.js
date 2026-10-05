@@ -2,6 +2,7 @@
 
 /* ---- 依赖（仅仓内，零宿主） ---- */
 const { RESOURCE_SCHEMAS } = require('./schemas');
+const providers = require('./providers');
 
 /* ---- 常量 ---- */
 const CAPABILITY_FACADES = ['register', 'has', 'configureResource'];
@@ -166,4 +167,8 @@ function upload(store) {
   };
 }
 
-module.exports = { capability: { schemas, create }, adapter: { download, upload } };
+module.exports = {
+  capability: { schemas, create },
+  adapter: { download, upload },
+  providers,
+};
