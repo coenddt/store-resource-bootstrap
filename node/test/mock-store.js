@@ -20,6 +20,9 @@ function mockStore(seed = {}) {
       calls.push(['configureResource', cfg]);
       return { pool: 'stub' };
     },
+    registerProvider(kind, mod) {
+      calls.push(['registerProvider', kind, mod]);
+    },
     async resourceOpen(id, opts) {
       calls.push(['resourceOpen', id, opts]);
       return { bytes: Buffer.from('hello'), resourceId: id, backend: 'local', key: 'k' };

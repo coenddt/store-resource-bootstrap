@@ -19,6 +19,9 @@ class MockStore:
         self.calls.append(("configure_resource", cfg))
         return {"pool": "stub"}
 
+    def register_provider(self, kind, mod):
+        self.calls.append(("register_provider", kind, mod))
+
     async def resource_open(self, rid, **kw):
         self.calls.append(("resource_open", rid, kw))
         return {"bytes": b"hello", "resourceId": rid, "backend": "local", "key": "k"}
