@@ -16,7 +16,7 @@ common-store 数据层家族（宿主 [nodejs-store](../nodejs-store) / [py-stor
 1. **能力引导** —— 注册资源三 schema `Resource` / `ResourceLocation` / `ResourceBinding`，并调宿主 store 既有 `configureResource({ providers, url, sign, schema })`；
 2. **接缝适配** —— 产出 store-api 所需的 `fileResolver`（薄读取透传）与薄透传的 `resourcePut`。
 
-三条铁律：**零语义发明、零宿主依赖、零回归**。插件不 `require` / `import` 任何宿主、皮肤或 core 包（亦无任何第三方运行时依赖）、不发明错误前缀 / 状态码（只抛普通错误）、不触碰任何兄弟仓库。对外暴露双命名空间：`capability` 与 `adapter`。唯一事实源是 [`spec/00-protocol.md`](./spec/00-protocol.md)。
+三条铁律：**零语义发明、零宿主依赖、零回归**。插件不 `require` / `import` 任何宿主、皮肤或 core 包（**默认无任何第三方运行时依赖**；可选参考 provider 模块 `oss` / `minio` 需 S3 兼容 SDK，声明为**可选依赖**、**懒加载**——未安装时模块可装载、`capability` / `adapter` 与测试均不受影响，仅实际调用其 `create()` 时报错）、不发明错误前缀 / 状态码（只抛普通错误）、不触碰任何兄弟仓库。对外暴露双命名空间 `capability` 与 `adapter`，另随包提供**可选参考 provider 命名空间** `providers`（`oss` / `minio`，S3 兼容预设；SDK 懒加载），供接入方在 `providerPlugins` 中直接引用。唯一事实源是 [`spec/00-protocol.md`](./spec/00-protocol.md)。
 
 ## 2. 快速上手
 
