@@ -10,6 +10,7 @@ import inspect
 from types import SimpleNamespace
 
 from .schemas import RESOURCE_SCHEMAS
+from . import providers as providers
 
 CAPABILITY_FACADES = ("register", "has", "configure_resource")
 ALLOWED_OPTS = ("providers", "url", "sign", "schema", "providerPlugins")
