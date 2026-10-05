@@ -16,6 +16,8 @@
 - `capability`：能力引导（`schemas` / `create`）；
 - `adapter`：接缝适配（`download` / `upload`）。
 
+另随包提供**可选参考 provider 命名空间** `providers`（`oss` / `minio`，S3 兼容预设；SDK 懒加载），供接入方在 `providerPlugins` 中直接引用。
+
 三条铁律：
 
 - **零语义发明**：插件不产生任何 HTTP 状态码 / 错误名 / 错误前缀，只抛普通 `Error`（下载 404 语义由 store-api 皮既有实现承担）；
@@ -128,7 +130,7 @@ from store_resource_bootstrap import capability, adapter
 
 - **插件零宿主依赖**：不 `require('nodejs-store')`、不 `import py_store`，也不依赖任何 core / 皮肤包；`store` 实例由接入方**作为参数**传入，插件只调其既有门面；
 - 宿主包在 `package.json` / `pyproject.toml` 中**仅作 optional peer 兼容性声明**（`nodejs-store >=3.0.0` / `py-store >=3.0.0`），不产生运行时依赖；
-- **无任何第三方运行时依赖**（node 标准库 / py 标准库即可）；
+- **默认无任何第三方运行时依赖**（node 标准库 / py 标准库即可）；**可选参考 provider 模块**（`providers.oss` / `providers.minio`）需要 S3 兼容 SDK（node `@aws-sdk/client-s3`、py `boto3`）——声明为**可选依赖**、**懒加载**：未安装时模块可装载、`capability` / `adapter` 与测试均不受影响，仅实际调用该模块 `create()` 时报错。
 - 插件内**不做** sha1 / 内容寻址 / URL 拼接（`createHash` / `hashlib` / `resourceComposeUrl` / `resource_compose_url`）——已下沉 core，插件零实现。
 
 ## 附录 A：三 schema 定义（唯一事实源）
