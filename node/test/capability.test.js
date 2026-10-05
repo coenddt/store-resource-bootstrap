@@ -66,6 +66,7 @@ test('C9 start() 首次', async () => {
   assert.deepEqual(out, {
     registered: ['Resource', 'ResourceLocation', 'ResourceBinding'],
     skipped: [],
+    providerRegistered: [],
   });
   assert.deepEqual(store.calls.map((c) => c[0]), ['register', 'register', 'register', 'configureResource']);
   assert.deepEqual(store.calls.slice(0, 3).map((c) => c[1]), ['Resource', 'ResourceLocation', 'ResourceBinding']);
@@ -106,6 +107,7 @@ test('C11 start() 幂等', async () => {
   assert.deepEqual(out2, {
     registered: [],
     skipped: ['Resource', 'ResourceLocation', 'ResourceBinding'],
+    providerRegistered: [],
   });
   assert.equal(store.calls.filter((c) => c[0] === 'register').length, regCount1);
   assert.equal(store.calls.filter((c) => c[0] === 'configureResource').length, 2);
@@ -124,4 +126,36 @@ test('C12 reload() ≡ start', async () => {
 test('C13 provider kind 不预检', () => {
   const store = mockStore();
   assert.doesNotThrow(() => capability.create(store, { providers: [{ kind: 'unknown-kind' }] }));
+});
+
+test('C14 providerPlugins 前置注册', async () => {
+  const store = mockStore();
+  const fn = (o) => ({ kind: 'oss', o });
+  const out = await capability.create(store, {
+    providers: [{ kind: 'local' }],
+    providerPlugins: [{ kind: 'oss', create: fn }],
+  }).start();
+  assert.deepEqual(store.calls.map((c) => c[0]), ['registerProvider', 'register', 'register', 'register', 'configureResource']);
+  assert.equal(store.calls[0][1], 'oss');
+  assert.equal(store.calls[0][2].create, fn);
+  assert.deepEqual(out.providerRegistered, ['oss']);
+});
+
+test('C15 providerPlugins 非空但缺门面', () => {
+  const store = mockStore();
+  delete store.registerProvider;
+  assert.throws(
+    () => capability.create(store, {
+      providers: [{ kind: 'local' }],
+      providerPlugins: [{ kind: 'oss', create: () => ({}) }],
+    }),
+    /registerProvider/,
+  );
+});
+
+test('C16 未传 / 空数组不要求 registerProvider 门面', () => {
+  const store = mockStore();
+  delete store.registerProvider;
+  assert.doesNotThrow(() => capability.create(store, { providers: [{ kind: 'local' }] }));
+  assert.doesNotThrow(() => capability.create(store, { providers: [{ kind: 'local' }], providerPlugins: [] }));
 });

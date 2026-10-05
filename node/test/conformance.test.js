@@ -36,6 +36,36 @@ for (const key of ['fresh', 'idempotent', 'defaults']) {
   });
 }
 
+test('conformance · capability.provider_plugins 前置注册与三元返回', async () => {
+  const entry = cases.capability.provider_plugins;
+  const store = mockStore(entry.seed);
+  const creates = entry.opts.providerPlugins.map((_, i) => (options) => ({ kind: 'stub', i, options }));
+  const opts = {
+    ...entry.opts,
+    providerPlugins: entry.opts.providerPlugins.map((spec, i) => ({ kind: spec.kind, create: creates[i] })),
+  };
+  const out = await capability.create(store, opts).start();
+
+  // 每项 kind 前置注册，且 create 引用一致
+  const regCalls = store.calls.filter((c) => c[0] === 'registerProvider');
+  assert.deepEqual(out.providerRegistered, entry.expected_registered_kinds);
+  assert.equal(regCalls.length, entry.expected_registered_kinds.length);
+  regCalls.forEach((c, i) => {
+    assert.equal(c[1], entry.expected_registered_kinds[i]);
+    assert.equal(c[2].create, creates[i]);
+  });
+
+  // provider 注册先于 configureResource
+  const names = store.calls.map((c) => c[0]);
+  assert.ok(names.lastIndexOf('registerProvider') < names.indexOf('configureResource'));
+
+  // 尾部调用（configureResource 入参）与剩余返回逐位一致
+  assert.deepEqual(store.calls.slice(-entry.expected_tail_calls.length), entry.expected_tail_calls);
+  for (const [k, v] of Object.entries(entry.expected_return_rest)) {
+    assert.deepEqual(out[k], v);
+  }
+});
+
 test('conformance · capability.invalid 抛错且零门面调用', () => {
   for (const c of cases.capability.invalid) {
     const store = mockStore();
