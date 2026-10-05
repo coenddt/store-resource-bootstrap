@@ -63,6 +63,7 @@ asyncio.run(main())
 ```jsonc
 {
   "providers": [ { "kind": "local", "options": { "root": "/data/resources" }, "priority": 0 } ],
+  "providerPlugins": [ { "kind": "oss", "create": "<provider factory create(options)>" } ],  // optional; default []
   "url":  { "base": "https://cdn.example.com" },  // optional; → configureResource({url}). default {}
   "sign": null,                                    // optional; function or null. default null → configureResource({sign})
   "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }  // optional; defaults to the host's same names
@@ -72,11 +73,12 @@ asyncio.run(main())
 | Field | Allowed type / value | Default | Notes |
 |---|---|---|---|
 | `providers` | **required**, non-empty array; each item `{kind: non-empty string, options?: object, priority?: int}` | none (required) | `kind` must be a provider **already registered** on the host (`local` / `s3` built in; others supplied by the integrator). The plugin does **not** pre-check `kind` validity — the host throws |
+| `providerPlugins` | array; each item `{kind: non-empty string, create: function}` | `[]` | provider factory registry; `create(options) -> provider`. **When non-empty**, the host must expose `registerProvider` (py `register_provider`). The plugin does **not** pre-check `kind` conflicts — the host registry handles them |
 | `url` | object | `{}` | passed through to `configureResource` verbatim |
 | `sign` | function \| `null` | `null` | passed through to `configureResource` verbatim |
 | `schema` | object | `{resource:'Resource',location:'ResourceLocation',binding:'ResourceBinding'}` | three schema-name mappings; passed through to `configureResource` verbatim |
 
-Only the four top-level keys above are allowed; any unknown key is a config error (throws, never silently ignored). See [`spec/00-protocol.md`](./spec/00-protocol.md) §Config shape / §Bootstrap rules for the full contract. The DDL boundary: the plugin **does not create tables** — the three schemas' DDL is covered by the integrator's existing `syncSchema` (node) / `load_defs` (py).
+Only the five top-level keys above are allowed; any unknown key is a config error (throws, never silently ignored). See [`spec/00-protocol.md`](./spec/00-protocol.md) §Config shape / §Bootstrap rules for the full contract. The DDL boundary: the plugin **does not create tables** — the three schemas' DDL is covered by the integrator's existing `syncSchema` (node) / `load_defs` (py).
 
 ## 4. Per-end contract table
 
@@ -85,13 +87,13 @@ Only the four top-level keys above are allowed; any unknown key is a config erro
 | `capability.schemas` · node | `schemas()` | `Array<object>` (the three tables, **deep-copied**; caller mutation does not affect the internal copy) |
 | `capability.schemas` · py | `schemas()` | `list[dict]` (as above, deep-copied) |
 | `capability.create` · node | `create(store, opts)` | `{ async start(), async reload() }` |
-| `capability.create` · py | `create(store, opts=None)` | `_Handle` with `async start()` / `async reload()`; `opts` keys are **identical** to node (camelCase: `providers`/`url`/`sign`/`schema`) |
+| `capability.create` · py | `create(store, opts=None)` | `_Handle` with `async start()` / `async reload()`; `opts` keys are **identical** to node (camelCase: `providers`/`providerPlugins`/`url`/`sign`/`schema`) |
 | `adapter.download` · node | `download(store, opts = {})` → `async (req, rec, id) => {body, contentType, fileName}` | store-api `fileResolver` contract; **camelCase keys** (aligned with `store-api/node` existing reads) |
 | `adapter.download` · py | `download(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `file_resolver` contract; `opts` keys same as node (`field` / `order`); **camelCase keys** (aligned with `store-api/py`'s `out.get("contentType")` / `out.get("fileName")`) |
 | `adapter.upload` · node | `upload(store)` → `async (input) => store.resourcePut(input)` | thin pass-through, does not touch the write input/output |
 | `adapter.upload` · py | `upload(store)` → `async (input: dict) => await store.resource_put(**input)` | thin pass-through; `input` keys are py-native (`file_name` / `mime` / `kind` / `bind` / `bytes`) |
 
-`start()` runs a fixed sequence (node; py is isomorphic with snake_case facade names): ① idempotently register each table (`has`/`register` are **synchronous**), ② `await store.configureResource({ providers, url, sign, schema })` (**asynchronous**), ③ return `{ registered: string[], skipped: string[] }` (observable, never silent). `reload()` ≡ runs `start()` again.
+`start()` runs a fixed sequence (node; py is isomorphic with snake_case facade names): ① register `providerPlugins` (**synchronous**, before `configureResource`), ② idempotently register each table (`has`/`register` are **synchronous**), ③ `await store.configureResource({ providers, url, sign, schema })` (**asynchronous**), ④ return `{ registered: string[], skipped: string[], providerRegistered: string[] }` (observable, never silent). `reload()` ≡ runs `start()` again.
 
 ## 5. First-wave scope and exclusions
 
