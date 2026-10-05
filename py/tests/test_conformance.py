@@ -48,6 +48,30 @@ def test_conformance_capability_sequences(key):
     assert out == entry["expected_return"]
 
 
+def test_conformance_capability_provider_plugins():
+    entry = CASES["capability"]["provider_plugins"]
+    store = MockStore(entry["seed"])
+    specs = entry["opts"]["providerPlugins"]
+    creates = [(lambda options=None, i=i: {"kind": "stub", "i": i}) for i in range(len(specs))]
+    opts = dict(entry["opts"])
+    opts["providerPlugins"] = [{"kind": s["kind"], "create": creates[i]} for i, s in enumerate(specs)]
+
+    out = run(capability.create(store, opts).start())
+
+    reg_calls = [c for c in store.calls if c[0] == "register_provider"]
+    assert out["providerRegistered"] == entry["expected_registered_kinds"]
+    assert len(reg_calls) == len(entry["expected_registered_kinds"])
+    for i, c in enumerate(reg_calls):
+        assert c[1] == entry["expected_registered_kinds"][i]
+        assert c[2].create is creates[i]
+
+    names = [c[0] for c in store.calls]
+    assert names.index("register_provider") < names.index("configure_resource")
+    assert store.calls[-len(entry["expected_tail_calls"]):] == [tr(c) for c in entry["expected_tail_calls"]]
+    for k, v in entry["expected_return_rest"].items():
+        assert out[k] == v
+
+
 def test_conformance_capability_invalid():
     for c in CASES["capability"]["invalid"]:
         store = MockStore()

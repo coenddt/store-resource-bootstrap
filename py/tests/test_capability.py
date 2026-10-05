@@ -100,7 +100,7 @@ def test_C9_start_first_call():
     out = run(handle.start())
     assert [c[0] for c in store.calls] == ["register", "register", "register", "configure_resource"]
     assert [c[1] for c in store.calls[:3]] == NAMES
-    assert out == {"registered": NAMES, "skipped": []}
+    assert out == {"registered": NAMES, "skipped": [], "providerRegistered": []}
 
 
 def test_C10_configure_resource_payload():
@@ -119,7 +119,7 @@ def test_C11_start_idempotent():
     handle = capability.create(store, _ok_opts())
     run(handle.start())
     out2 = run(handle.start())
-    assert out2 == {"registered": [], "skipped": NAMES}
+    assert out2 == {"registered": [], "skipped": NAMES, "providerRegistered": []}
     assert len([c for c in store.calls if c[0] == "register"]) == 3
     assert len([c for c in store.calls if c[0] == "configure_resource"]) == 2
 
@@ -137,3 +137,52 @@ def test_C13_provider_kind_not_prechecked():
     store = _store()
     handle = capability.create(store, {"providers": [{"kind": "bogus"}]})
     assert handle is not None
+
+
+# ---- C14–C16：providerPlugins 条件化门面 ----
+
+
+class _NoFacade:
+    """仅具 register / has / configure_resource，用于验证条件化门面。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def has(self, name):
+        return False
+
+    def register(self, defn):
+        self.calls.append(("register", defn["name"]))
+
+    def configure_resource(self, cfg):
+        self.calls.append(("configure_resource", cfg))
+
+
+def test_C14_provider_plugins_precede_register():
+    store = _store()
+    fn = lambda o=None: {"kind": "oss", "o": o}
+    handle = capability.create(store, {
+        "providers": [{"kind": "local"}],
+        "providerPlugins": [{"kind": "oss", "create": fn}],
+    })
+    out = run(handle.start())
+    assert [c[0] for c in store.calls] == [
+        "register_provider", "register", "register", "register", "configure_resource"
+    ]
+    assert store.calls[0][1] == "oss"
+    assert store.calls[0][2].create is fn
+    assert out["providerRegistered"] == ["oss"]
+
+
+def test_C15_provider_plugins_missing_facade():
+    with pytest.raises(ValueError, match="register_provider"):
+        capability.create(_NoFacade(), {
+            "providers": [{"kind": "local"}],
+            "providerPlugins": [{"kind": "oss", "create": lambda o=None: {}}],
+        })
+
+
+def test_C16_no_facade_required_when_absent_or_empty():
+    store = _NoFacade()
+    capability.create(store, {"providers": [{"kind": "local"}]})                          # 未传
+    capability.create(store, {"providers": [{"kind": "local"}], "providerPlugins": []})   # 空数组
