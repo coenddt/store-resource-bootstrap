@@ -1,0 +1,166 @@
+{
+  "comment": "双端一致性用例：同一份 JSON，node:test 与 pytest 各自加载执行。双端命名差异以 {node, py} 表达；本文件不复制实现常量（三 schema 除外——其为唯一事实源的镜像）。",
+  "facades": {
+    "node": ["has", "register", "configureResource", "resourceOpen", "queryOne", "resourcePut"],
+    "py": ["has", "register", "configure_resource", "resource_open", "query_one", "resource_put"]
+  },
+  "expect_error_class": { "node": "Error", "py": "ValueError" },
+  "schemas": {
+    "names": ["Resource", "ResourceLocation", "ResourceBinding"],
+    "collections": {
+      "Resource": "resources",
+      "ResourceLocation": "resource_locations",
+      "ResourceBinding": "resource_bindings"
+    },
+    "id_prefixes": { "Resource": "", "ResourceLocation": "rl", "ResourceBinding": "rb" },
+    "canonical": [
+      {
+        "name": "Resource", "collection": "resources", "idPrefix": "", "timestamps": true,
+        "read": [], "write": [],
+        "fields": {
+          "_id":      { "type": "string" },
+          "sha1":     { "type": "string" },
+          "fileName": { "type": "string" },
+          "mime":     { "type": "string" },
+          "size":     { "type": "int" },
+          "kind":     { "type": "string" }
+        },
+        "relations": {},
+        "indexes": [ { "keys": { "sha1": 1 }, "options": { "unique": true } } ]
+      },
+      {
+        "name": "ResourceLocation", "collection": "resource_locations", "idPrefix": "rl", "timestamps": true,
+        "read": [], "write": [],
+        "fields": {
+          "_id":        { "type": "string" },
+          "resourceId": { "type": "string" },
+          "backend":    { "type": "string" },
+          "key":        { "type": "string" },
+          "status":     { "type": "string" },
+          "priority":   { "type": "int" }
+        },
+        "relations": {
+          "resource": { "model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": [] }
+        },
+        "indexes": [ { "keys": { "resourceId": 1, "backend": 1 }, "options": { "unique": true } } ]
+      },
+      {
+        "name": "ResourceBinding", "collection": "resource_bindings", "idPrefix": "rb", "timestamps": true,
+        "read": [], "write": [],
+        "fields": {
+          "_id":           { "type": "string" },
+          "resourceId":    { "type": "string" },
+          "businessTable": { "type": "string" },
+          "businessId":    { "type": "string" },
+          "userId":        { "type": "string" }
+        },
+        "relations": {
+          "resource": { "model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": [] }
+        },
+        "indexes": [ { "keys": { "resourceId": 1, "businessTable": 1, "businessId": 1 }, "options": { "unique": true } } ]
+      }
+    ]
+  },
+  "capability": {
+    "fresh": {
+      "opts": {
+        "providers": [ { "kind": "local", "options": { "root": "/data/resources" }, "priority": 0 } ],
+        "url": { "base": "https://cdn.example.com" },
+        "sign": null
+      },
+      "seed": [],
+      "expected_calls": [
+        ["register", "Resource"],
+        ["register", "ResourceLocation"],
+        ["register", "ResourceBinding"],
+        ["configureResource", {
+          "providers": [ { "kind": "local", "options": { "root": "/data/resources" }, "priority": 0 } ],
+          "url": { "base": "https://cdn.example.com" },
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
+        }]
+      ],
+      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [] }
+    },
+    "idempotent": {
+      "opts": { "providers": [ { "kind": "local" } ] },
+      "seed": ["Resource", "ResourceLocation", "ResourceBinding"],
+      "expected_calls": [
+        ["configureResource", {
+          "providers": [ { "kind": "local" } ],
+          "url": {},
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
+        }]
+      ],
+      "expected_return": { "registered": [], "skipped": ["Resource", "ResourceLocation", "ResourceBinding"] }
+    },
+    "defaults": {
+      "opts": { "providers": [ { "kind": "local" } ] },
+      "seed": [],
+      "expected_calls": [
+        ["register", "Resource"],
+        ["register", "ResourceLocation"],
+        ["register", "ResourceBinding"],
+        ["configureResource", {
+          "providers": [ { "kind": "local" } ],
+          "url": {},
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
+        }]
+      ],
+      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [] }
+    },
+    "invalid": [
+      { "name": "unknown_key",            "opts": { "providers": [ { "kind": "local" } ], "foo": 1 },           "error_contains": "foo",      "expected_call_count": 0 },
+      { "name": "providers_missing",      "opts": {},                                                            "error_contains": "providers", "expected_call_count": 0 },
+      { "name": "providers_empty",        "opts": { "providers": [] },                                            "error_contains": "providers", "expected_call_count": 0 },
+      { "name": "bad_kind",               "opts": { "providers": [ { "kind": "" } ] },                             "error_contains": "kind",      "expected_call_count": 0 },
+      { "name": "bad_options",            "opts": { "providers": [ { "kind": "local", "options": 1 } ] },          "error_contains": "options",   "expected_call_count": 0 },
+      { "name": "bad_priority",           "opts": { "providers": [ { "kind": "local", "priority": 1.5 } ] },       "error_contains": "priority",  "expected_call_count": 0 },
+      { "name": "bad_url",                "opts": { "providers": [ { "kind": "local" } ], "url": 1 },              "error_contains": "url",       "expected_call_count": 0 },
+      { "name": "bad_sign",               "opts": { "providers": [ { "kind": "local" } ], "sign": "x" },           "error_contains": "sign",      "expected_call_count": 0 },
+      { "name": "bad_schema",             "opts": { "providers": [ { "kind": "local" } ], "schema": 1 },           "error_contains": "schema",    "expected_call_count": 0 }
+    ]
+  },
+  "adapter": {
+    "download": {
+      "opts": {},
+      "record": { "file": "ref1" },
+      "expected_result": { "contentType": "text/plain", "fileName": "a.txt", "body_text": "hello" },
+      "expected_open_call": ["resourceOpen", "ref1", {}],
+      "expected_query_call": ["queryOne", "Resource($condition: @c0) { _id, fileName, mime }", { "c0": { "_id": "ref1" } }]
+    },
+    "download_field": {
+      "opts": { "field": "coverId" },
+      "record": { "coverId": "ref2" },
+      "expected_open_call": ["resourceOpen", "ref2", {}]
+    },
+    "download_order": {
+      "opts": { "order": ["local"] },
+      "record": { "file": "ref1" },
+      "expected_open_call": ["resourceOpen", "ref1", { "order": ["local"] }]
+    },
+    "missing_ref": [
+      { "name": "absent",      "record": {},                "error_contains": "file" },
+      { "name": "empty",       "record": { "file": "" },    "error_contains": "file" },
+      { "name": "null_record", "record": null,              "error_contains": "file" }
+    ],
+    "mime_fallback": {
+      "meta": { "mime": null, "fileName": "a.txt" },
+      "expected": { "contentType": "application/octet-stream", "fileName": "a.txt" }
+    },
+    "filename_fallback": {
+      "meta": { "mime": "text/plain" },
+      "expected": { "contentType": "text/plain", "fileName": "ref1" }
+    },
+    "upload": {
+      "input": { "bytes": [104, 105], "file_name": "a.txt", "mime": "text/plain", "kind": "file", "bind": null }
+    }
+  },
+  "machine_checks": {
+    "forbidden_literals": ["404", "NOT_FOUND", "ERR_", "500"],
+    "forbidden_host_refs": ["require('nodejs-store')", "require(\"nodejs-store\")", "import py_store", "from py_store"],
+    "forbidden_calls": ["createHash", "hashlib", "resourceComposeUrl", "resource_compose_url"]
+  }
+}

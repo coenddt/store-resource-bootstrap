@@ -3,7 +3,10 @@
 /** 记录调用的最小宿主替身；同步门面返回直接值，异步门面返回 Promise。 */
 function mockStore(seed = {}) {
   const calls = [];
-  const registered = new Map(Object.entries(seed));
+  // seed 支持两种形状：表名数组（conformance）或 {name: defn} 对象（单测）
+  const registered = new Map(
+    Array.isArray(seed) ? seed.map((n) => [n, true]) : Object.entries(seed),
+  );
   return {
     calls,
     has(name) {

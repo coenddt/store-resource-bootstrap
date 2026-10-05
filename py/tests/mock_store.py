@@ -5,7 +5,8 @@ from __future__ import annotations
 class MockStore:
     def __init__(self, seed=None):
         self.calls = []                                  # [("register", name), ("configure_resource", cfg), ...]
-        self.registered = dict(seed or {})
+        # seed 为表名列表（conformance 传入），仅映射为「已注册」集合
+        self.registered = {n: True for n in (seed or [])}
 
     def has(self, name):
         return name in self.registered
