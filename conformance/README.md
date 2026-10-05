@@ -25,6 +25,7 @@
 | `adapter.missing_ref` | 缺引用（字段缺失 / 空串 / `null` 记录）须抛错且零资源调用 |
 | `adapter.mime_fallback` / `filename_fallback` | `mime` / `fileName` 缺省兜底 |
 | `adapter.upload` | 上传薄透传入参 |
+| `adapter.download_dot_path` / `download_request_field` / `upload_resolver` | 点路径下载 / 请求级 `?field` 优先 / 上传接缝工厂（落库入参与返回 `ref`） |
 | `machine_checks.forbidden_literals` | 冻结源文件禁止出现的状态码类字样（`404` / `NOT_FOUND` / `ERR_` / `500`） |
 | `machine_checks.forbidden_host_refs` | 冻结源文件禁止出现的宿主引用 |
 | `machine_checks.forbidden_calls` | 冻结源文件禁止出现的哈希 / URL 拼接调用 |

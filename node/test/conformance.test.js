@@ -142,6 +142,35 @@ test('conformance · adapter.upload 薄透传', async () => {
   assert.deepEqual(ret, { resourceId: 'sha1', sha1: 'sha1', locations: [] });
 });
 
+test('conformance · adapter.download 点路径 / 请求级 field', async () => {
+  const d = cases.adapter.download_dot_path;
+  const s1 = mockStore();
+  await adapter.download(s1, d.opts)({}, d.record, 'id1');
+  assert.deepEqual(s1.calls[0], d.expected_open_call);
+
+  const r = cases.adapter.download_request_field;
+  const s2 = mockStore();
+  await adapter.download(s2, r.opts)({ query: { ...r.request_query } }, r.record, 'id1');
+  assert.deepEqual(s2.calls[0], r.expected_open_call);
+});
+
+test('conformance · adapter.uploadResolver 落库且返回 ref', async () => {
+  const c = cases.adapter.upload_resolver;
+  const store = mockStore();
+  const req = {
+    body: Buffer.from(c.request.body_bytes),
+    query: { ...c.request.query },
+    headers: { ...c.request.headers },
+  };
+  const out = await adapter.uploadResolver(store, c.opts)(req, c.record, c.record._id);
+  const put = store.calls.find((x) => x[0] === 'resourcePut')[1];
+  assert.deepEqual(put.bytes, Buffer.from(c.expected_put.node.bytes));
+  assert.equal(put.kind, c.expected_put.node.kind);
+  assert.equal(put.fileName, c.expected_put.node.fileName);
+  assert.equal(put.mime, c.expected_put.node.mime);
+  assert.deepEqual(out, { ref: c.expected_ref });
+});
+
 test('conformance · 机检：src 无禁用字样', () => {
   const dir = path.join(__dirname, '..', 'src');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));

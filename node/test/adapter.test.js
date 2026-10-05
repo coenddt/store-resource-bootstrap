@@ -75,3 +75,51 @@ test('D9 upload 透传', async () => {
   delete s2.resourcePut;
   assert.throws(() => adapter.upload(s2), /resourcePut/);
 });
+
+test('D10 点路径取值', async () => {
+  const store = mockStore();
+  await adapter.download(store, { field: 'images.original' })({}, { images: { original: 'ref3' } }, 'id');
+  assert.equal(store.calls.find((c) => c[0] === 'resourceOpen')[1], 'ref3');
+});
+
+test('D11 请求级 ?field 优先于构造期 field', async () => {
+  const store = mockStore();
+  await adapter.download(store, { field: 'file' })(
+    { query: { field: 'images.original' } },
+    { file: 'ref0', images: { original: 'ref1' } },
+    'id',
+  );
+  assert.equal(store.calls.find((c) => c[0] === 'resourceOpen')[1], 'ref1');
+});
+
+test('D12 uploadResolver 正常路径（落库入参 + 返回 ref）', async () => {
+  const store = mockStore();
+  const out = await adapter.uploadResolver(store, { kind: 'image' })(
+    { body: Buffer.from('hi'), query: { fileName: 'a.png', mime: 'image/png' }, headers: {} },
+    { _id: 'ART1' },
+    'ART1',
+  );
+  const put = store.calls.find((c) => c[0] === 'resourcePut')[1];
+  assert.deepEqual(put.bytes, Buffer.from('hi'));
+  assert.equal(put.kind, 'image');
+  assert.equal(put.fileName, 'a.png');
+  assert.equal(put.mime, 'image/png');
+  assert.deepEqual(out, { ref: 'sha1' });
+});
+
+test('D13 uploadResolver 空体抛错且零落库', async () => {
+  const store = mockStore();
+  await assert.rejects(
+    () => adapter.uploadResolver(store)({ body: Buffer.alloc(0), headers: {} }, {}, 'id'),
+    /上传字节体/,
+  );
+  assert.equal(store.calls.some((c) => c[0] === 'resourcePut'), false);
+});
+
+test('D14 uploadResolver 构造期校验', () => {
+  const s1 = mockStore();
+  delete s1.resourcePut;
+  assert.throws(() => adapter.uploadResolver(s1), /resourcePut/);
+  assert.throws(() => adapter.uploadResolver(mockStore(), { kind: '' }), /kind/);
+  assert.throws(() => adapter.uploadResolver(mockStore(), { bind: 'x' }), /bind/);
+});

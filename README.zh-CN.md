@@ -14,7 +14,7 @@ common-store 数据层家族（宿主 [nodejs-store](../nodejs-store) / [py-stor
 插件只做两件事，别的一概不做：
 
 1. **能力引导** —— 注册资源三 schema `Resource` / `ResourceLocation` / `ResourceBinding`，并调宿主 store 既有 `configureResource({ providers, url, sign, schema })`；
-2. **接缝适配** —— 产出 store-api 所需的 `fileResolver`（薄读取透传）与薄透传的 `resourcePut`。
+2. **接缝适配** —— 产出 store-api 所需的 `fileResolver`（`download`）、`uploadResolver`（上传接缝）与薄透传的 `resourcePut`（`upload`）。
 
 三条铁律：**零语义发明、零宿主依赖、零回归**。插件不 `require` / `import` 任何宿主、皮肤或 core 包（**默认无任何第三方运行时依赖**；可选参考 provider 模块 `oss` / `minio` 需 S3 兼容 SDK，声明为**可选依赖**、**懒加载**——未安装时模块可装载、`capability` / `adapter` 与测试均不受影响，仅实际调用其 `create()` 时报错）、不发明错误前缀 / 状态码（只抛普通错误）、不触碰任何兄弟仓库。对外暴露双命名空间 `capability` 与 `adapter`，另随包提供**可选参考 provider 命名空间** `providers`（`oss` / `minio`，S3 兼容预设；SDK 懒加载），供接入方在 `providerPlugins` 中直接引用。唯一事实源是 [`spec/00-protocol.md`](./spec/00-protocol.md)。
 
@@ -36,6 +36,8 @@ await handle.start();
 // 接缝适配：store-api fileResolver（GET /{resource}/:id/file）
 const fileResolver = adapter.download(store);
 // const put = adapter.upload(store);  // 薄透传 store.resourcePut(input)
+// 接缝适配：store-api uploadResolver（POST /{resource}/:id/file）
+const uploadResolver = adapter.uploadResolver(store);
 ```
 
 ### Python（`store-resource-bootstrap-py`）
@@ -54,6 +56,7 @@ async def main():
 
     file_resolver = adapter.download(store)
     # put = adapter.upload(store)  # 薄透传 store.resource_put(**input)
+    upload_resolver = adapter.upload_resolver(store)
 
 asyncio.run(main())
 ```
@@ -92,6 +95,8 @@ asyncio.run(main())
 | `adapter.download` · py | `download(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `file_resolver` 契约；`opts` 键同 node（`field` / `order`）；**camelCase 键**（对齐 `store-api/py` 的 `out.get("contentType")` / `out.get("fileName")`） |
 | `adapter.upload` · node | `upload(store)` → `async (input) => store.resourcePut(input)` | 薄透传，不改写入参/出参 |
 | `adapter.upload` · py | `upload(store)` → `async (input: dict) => await store.resource_put(**input)` | 薄透传，`input` 键为 py 原生（`file_name` / `mime` / `kind` / `bind` / `bytes`） |
+| `adapter.uploadResolver` · node | `uploadResolver(store, opts = {})` → `async (req, rec, id) => { ref }` | store-api `uploadResolver` 契约；`req.body` 为皮已缓冲的 `Buffer` |
+| `adapter.uploadResolver` · py | `upload_resolver(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `upload_resolver` 契约；`request` 兼容 Starlette Request / dict；`opts` 键同 node（`kind` / `bind`） |
 
 `start()` 固定序列（node；py 同构，门面名 snake_case）：① 注册 `providerPlugins`（**同步**，先于 `configureResource`）；② 逐表幂等注册（`has` / `register` 为**同步**调用）；③ `await store.configureResource({ providers, url, sign, schema })`（**异步**）；④ 返回 `{ registered: string[], skipped: string[], providerRegistered: string[] }`（可观测，禁静默）。`reload()` ≡ 再跑一次 `start()`。
 

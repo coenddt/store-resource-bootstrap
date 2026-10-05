@@ -106,3 +106,56 @@ def test_D9_upload_passthrough():
     broken.resource_put = None
     with pytest.raises(ValueError):
         adapter.upload(broken)
+
+
+class _Req:
+    """conformance / 单测用的最小请求替身（Starlette 形态）。"""
+
+    def __init__(self, query=None, headers=None, body=b""):
+        self.query_params = dict(query or {})
+        self.headers = dict(headers or {})
+        self._body = body
+
+    async def body(self):
+        return self._body
+
+
+def test_D10_dot_path():
+    store = _store()
+    run(adapter.download(store, {"field": "images.original"})(None, {"images": {"original": "ref3"}}, "id"))
+    assert ("resource_open", "ref3", {}) in store.calls
+
+
+def test_D11_request_field_priority():
+    store = _store()
+    req = _Req(query={"field": "images.original"})
+    run(adapter.download(store, {"field": "file"})(req, {"file": "ref0", "images": {"original": "ref1"}}, "id"))
+    assert ("resource_open", "ref1", {}) in store.calls
+
+
+def test_D12_upload_resolver_normal():
+    store = _store()
+    req = _Req(query={"fileName": "a.png", "mime": "image/png"}, headers={}, body=b"hi")
+    out = run(adapter.upload_resolver(store, {"kind": "image"})(req, {"_id": "ART1"}, "ART1"))
+    put = next(c[1] for c in store.calls if c[0] == "resource_put")
+    assert put["bytes"] == b"hi" and put["kind"] == "image"
+    assert put["file_name"] == "a.png" and put["mime"] == "image/png"
+    assert out == {"ref": "sha1"}
+
+
+def test_D13_upload_resolver_empty_body():
+    store = _store()
+    with pytest.raises(ValueError, match="上传字节体"):
+        run(adapter.upload_resolver(store)(_Req(body=b""), {}, "id"))
+    assert not any(c[0] == "resource_put" for c in store.calls)
+
+
+def test_D14_upload_resolver_construction_errors():
+    broken = _store()
+    broken.resource_put = None
+    with pytest.raises(ValueError):
+        adapter.upload_resolver(broken)
+    with pytest.raises(ValueError):
+        adapter.upload_resolver(_store(), {"kind": ""})
+    with pytest.raises(ValueError):
+        adapter.upload_resolver(_store(), {"bind": "x"})

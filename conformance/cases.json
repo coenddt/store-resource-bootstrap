@@ -180,6 +180,31 @@
     },
     "upload": {
       "input": { "bytes": [104, 105], "file_name": "a.txt", "mime": "text/plain", "kind": "file", "bind": null }
+    },
+    "download_dot_path": {
+      "opts": { "field": "images.original" },
+      "record": { "images": { "original": "ref3" } },
+      "expected_open_call": ["resourceOpen", "ref3", {}]
+    },
+    "download_request_field": {
+      "opts": { "field": "file" },
+      "record": { "file": "ref0", "images": { "original": "ref1" } },
+      "request_query": { "field": "images.original" },
+      "expected_open_call": ["resourceOpen", "ref1", {}]
+    },
+    "upload_resolver": {
+      "opts": { "kind": "image" },
+      "record": { "_id": "ART1", "fileName": "rec.jpg" },
+      "request": {
+        "body_bytes": [104, 105],
+        "query": { "fileName": "a.png", "mime": "image/png" },
+        "headers": { "content-type": "image/png" }
+      },
+      "expected_put": {
+        "node": { "bytes": [104, 105], "kind": "image", "fileName": "a.png", "mime": "image/png" },
+        "py":   { "bytes": [104, 105], "kind": "image", "file_name": "a.png", "mime": "image/png" }
+      },
+      "expected_ref": "sha1"
     }
   },
   "machine_checks": {

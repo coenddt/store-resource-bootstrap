@@ -141,6 +141,67 @@ def create(store, opts=None):
 _RESOURCE_PROJECTION = " { _id, fileName, mime }"  # 投影语法同 store-api/node/src/plugin.js L109
 
 
+def _attr(obj, name, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _query_param(request, name):
+    """请求级查询参数：兼容 Starlette request.query_params 与 dict request['query']；缺省 None。"""
+    if request is None:
+        return None
+    qp = _attr(request, "query_params", None)
+    if qp is not None and hasattr(qp, "get"):
+        v = qp.get(name)
+        if isinstance(v, str) and v != "":
+            return v
+    q = _attr(request, "query", None)
+    if isinstance(q, dict):
+        v = q.get(name)
+        if isinstance(v, str) and v != "":
+            return v
+    return None
+
+
+def _header(request, name):
+    """请求头取值：兼容 Starlette request.headers 与 dict request['headers']；缺省 None。"""
+    headers = _attr(request, "headers", None)
+    if headers is None or not hasattr(headers, "get"):
+        return None
+    v = headers.get(name)
+    return v if isinstance(v, str) and v != "" else None
+
+
+async def _request_body(request):
+    """上传字节体：Starlette await request.body() / dict request['body']；缺省 None。"""
+    if request is None:
+        return None
+    if isinstance(request, dict):
+        return request.get("body")
+    body = getattr(request, "body", None)
+    if body is None:
+        return None
+    out = body()
+    if inspect.isawaitable(out):
+        out = await out
+    return out
+
+
+def _pick_by_path(rec, field_path):
+    """点路径取值：'images.original' → rec['images']['original']；任一段缺失 → None。"""
+    if not isinstance(rec, dict):
+        return None
+    cur = rec
+    for seg in field_path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(seg)
+    return cur
+
+
 def download(store, opts=None):
     _assert_store(store, ("resource_open", "query_one"), "adapter.download")
     opts = {} if opts is None else opts
@@ -153,9 +214,10 @@ def download(store, opts=None):
 
     # 返回 store-api 既有 file_resolver 契约：(request, rec, rid) -> {body, contentType, fileName}
     async def file_resolver(request, rec, rid):
-        ref = None if rec is None else rec.get(field)
+        fp = _query_param(request, "field") or field          # 请求级 field 优先，缺省回落构造期 field
+        ref = _pick_by_path(rec, fp)
         if ref is None or ref == "":
-            raise ValueError(f"记录缺少资源引用字段: {field}")
+            raise ValueError(f"记录缺少资源引用字段: {fp}")
         if order is None:
             opened = await _call(store.resource_open, ref)
         else:
@@ -184,5 +246,43 @@ def upload(store):
     return upload_
 
 
+def upload_resolver(store, opts=None):
+    """上传接缝工厂（决策 B，与 download 对称）：(request, rec, rid) -> {"ref": sha1}。"""
+    _assert_store(store, ("resource_put",), "adapter.uploadResolver")
+    opts = {} if opts is None else opts
+    if not isinstance(opts, dict):
+        raise ValueError("adapter.uploadResolver: opts 须为 dict")
+    kind = opts.get("kind", "file")
+    if not isinstance(kind, str) or kind == "":
+        raise ValueError("adapter.uploadResolver: kind 须为非空字符串")
+    bind = opts.get("bind")
+    if bind is not None and not callable(bind):
+        raise ValueError("adapter.uploadResolver: bind 须为函数或 None")
+
+    async def upload_resolver_(request, rec, rid):
+        body = await _request_body(request)
+        if not body:
+            raise ValueError("上传字节体为空：皮未缓冲 request body 或请求体缺失")
+        input_ = {"bytes": bytes(body), "kind": kind}
+        file_name = _query_param(request, "fileName") or (rec or {}).get("fileName")
+        mime = _query_param(request, "mime") or _header(request, "content-type")
+        if file_name:
+            input_["file_name"] = file_name
+        if mime:
+            input_["mime"] = mime
+        if callable(bind):
+            b = bind(request, rec, rid)
+            if b is not None:
+                input_["bind"] = b
+        # 薄透传：字节落库仍由 store.resource_put 承担（本插件不做 IO）
+        out = await _call(store.resource_put, **input_)
+        ref = (out or {}).get("resourceId")
+        if not ref:
+            raise ValueError("resource_put 未返回 resourceId")
+        return {"ref": ref}
+
+    return upload_resolver_
+
+
 capability = SimpleNamespace(schemas=schemas, create=create)
-adapter = SimpleNamespace(download=download, upload=upload)
+adapter = SimpleNamespace(download=download, upload=upload, upload_resolver=upload_resolver)

@@ -9,12 +9,12 @@
 `store-resource-bootstrap` 属于 common-store「插件 / 胶水」层（**非协议皮、非宿主、非 core**），形态复刻 `store-rbac-bootstrap`（读配置 → 挂接既有接缝），只做两件事：
 
 1. **能力引导**：把资源三 schema 注册进宿主 store（`register`，幂等），并把 `providers` / `url` / `sign` / `schema` 装配给宿主既有资源门面 `configureResource`；
-2. **接缝适配**：产出皮肤下载所需的 `fileResolver`（`download`）与薄透传的 `resourcePut`（`upload`）。
+2. **接缝适配**：产出皮肤**读写**所需的 `fileResolver`（`download`）与 `uploadResolver`（上传），另保留薄透传的 `resourcePut`（`upload`）。
 
 显式声明**双命名空间**：
 
 - `capability`：能力引导（`schemas` / `create`）；
-- `adapter`：接缝适配（`download` / `upload`）。
+- `adapter`：接缝适配（`download` / `upload` / `uploadResolver`）。
 
 另随包提供**可选参考 provider 命名空间** `providers`（`oss` / `minio`，S3 兼容预设；SDK 懒加载），供接入方在 `providerPlugins` 中直接引用。
 
@@ -54,8 +54,15 @@
 
 | 字段 | 允许类型 / 取值 | 缺省 | 备注 |
 |---|---|---|---|
-| `field` | 非空字符串 | `'file'` | 记录上承载资源引用的字段名 |
+| `field` | 非空字符串 | `'file'` | 记录上承载资源引用的字段名；支持点路径（如 `images.original`）；请求级 `?field` 优先于本项 |
 | `order` | 数组 \| `undefined` | `undefined` | 引用为数组时的取值顺序提示；缺省按原序 |
+
+`adapter.uploadResolver(store, opts)` 的 `opts`：
+
+| 字段 | 允许类型 / 取值 | 缺省 | 备注 |
+|---|---|---|---|
+| `kind` | 非空字符串 | `'file'` | 写入 `Resource.kind` 的资源类别 |
+| `bind` | 函数 \| `null` | `null` | `(req, rec, id) => {businessTable, businessId} \| null`；返回 null 则不写 `ResourceBinding` |
 
 ## 引导规则
 
@@ -112,6 +119,8 @@ from store_resource_bootstrap import capability, adapter
 | `adapter.download` · py | `download(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `file_resolver` 契约；`opts` 键同 node（`field` / `order`）；**camelCase 键**（对齐 `store-api/py` 的 `out.get("contentType")` / `out.get("fileName")`） |
 | `adapter.upload` · node | `upload(store)` → `async (input) => store.resourcePut(input)` | 薄透传，不改写入参 / 出参 |
 | `adapter.upload` · py | `upload(store)` → `async (input: dict) => await store.resource_put(**input)` | 薄透传，`input` 键为 py 原生（`file_name` / `mime` / `kind` / `bind` / `bytes`） |
+| `adapter.uploadResolver` · node | `uploadResolver(store, opts = {})` → `async (req, rec, id) => { ref }` | store-api `uploadResolver` 契约；`req.body` 为皮已缓冲的 `Buffer` |
+| `adapter.uploadResolver` · py | `upload_resolver(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `upload_resolver` 契约；`request` 兼容 Starlette Request / dict；`opts` 键同 node（`kind` / `bind`） |
 
 **宿主门面同步 / 异步分流**：`register` / `has` / `configureResource`（py `configure_resource`）/ `registerProvider`（py `register_provider`）为**同步**；`resourcePut` / `resourceOpen` / `queryOne`（py `resource_put` / `resource_open` / `query_one`）为**异步**。
 
@@ -120,6 +129,7 @@ from store_resource_bootstrap import capability, adapter
 | 情形 | 插件行为 |
 |---|---|
 | `download` 记录缺引用字段 / 引用为空 | 抛**普通 `Error`**（中文 message，**无 `ERR_` 前缀**） |
+| `uploadResolver` 请求体为空 / `resourcePut` 未返回 `resourceId` | 抛**普通 `Error`**（中文 message，**无 `ERR_` 前缀**） |
 | `capability.create` 配置非法（未知顶层键 / 类型不符 / 缺门面方法） | 抛 `Error`，消息含字段名 / 方法名 |
 | `resourceOpen` 未命中 / 底层读取失败 | 宿主抛错，插件**原样上抛、不捕获、不改写** |
 

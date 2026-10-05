@@ -1,6 +1,6 @@
 [project]
 name = "store-resource-bootstrap-py"
-version = "0.1.0"
+version = "0.2.0"
 description = "Optional resource bootstrap plugin for common-store: registers the three resource schemas, wires the host resource capability (providers / url / sign) and produces the store-api fileResolver seam, for py-store hosts"
 requires-python = ">=3.10"
 license = { text = "MIT" }

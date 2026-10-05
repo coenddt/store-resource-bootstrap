@@ -147,6 +147,45 @@ def test_conformance_upload_passthrough():
     assert ret == {"resourceId": "sha1", "sha1": "sha1", "locations": []}
 
 
+def test_conformance_download_dot_path_and_request_field():
+    d = CASES["adapter"]["download_dot_path"]
+    s1 = MockStore()
+    run(adapter.download(s1, d["opts"])(None, d["record"], "id1"))
+    assert s1.calls[0] == tr(d["expected_open_call"])
+
+    r = CASES["adapter"]["download_request_field"]
+    s2 = MockStore()
+    req = _Req(query=r["request_query"])
+    run(adapter.download(s2, r["opts"])(req, r["record"], "id1"))
+    assert s2.calls[0] == tr(r["expected_open_call"])
+
+
+class _Req:
+    def __init__(self, query=None, headers=None, body=b""):
+        self.query_params = dict(query or {})
+        self.headers = dict(headers or {})
+        self._body = body
+
+    async def body(self):
+        return self._body
+
+
+def test_conformance_upload_resolver():
+    c = CASES["adapter"]["upload_resolver"]
+    store = MockStore()
+    resolve = adapter.upload_resolver(store, c["opts"])
+    spec = c["request"]
+    req = _Req(query=spec["query"], headers=spec["headers"], body=bytes(spec["body_bytes"]))
+    out = run(resolve(req, c["record"], c["record"]["_id"]))
+    put = next(x[1] for x in store.calls if x[0] == "resource_put")
+    exp = c["expected_put"]["py"]
+    assert put["bytes"] == bytes(exp["bytes"])
+    assert put["kind"] == exp["kind"]
+    assert put["file_name"] == exp["file_name"]
+    assert put["mime"] == exp["mime"]
+    assert out == {"ref": c["expected_ref"]}
+
+
 def test_conformance_machine_checks():
     src = Path(__file__).parents[1] / "src" / "store_resource_bootstrap"
     blocked = (
