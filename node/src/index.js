@@ -5,7 +5,7 @@ const { RESOURCE_SCHEMAS } = require('./schemas');
 
 /* ---- 常量 ---- */
 const CAPABILITY_FACADES = ['register', 'has', 'configureResource'];
-const ALLOWED_OPTS = ['providers', 'url', 'sign', 'schema'];
+const ALLOWED_OPTS = ['providers', 'url', 'sign', 'schema', 'providerPlugins'];
 const DEFAULT_SCHEMA_NAMES = {
   resource: 'Resource',
   location: 'ResourceLocation',
@@ -75,10 +75,34 @@ function create(store, opts = {}) {
   if (schema === null || typeof schema !== 'object') {
     throw new Error('capability.create: schema 须为对象');
   }
+  const providerPlugins = opts.providerPlugins === undefined ? [] : opts.providerPlugins;
+  if (!Array.isArray(providerPlugins)) {
+    throw new Error('capability.create: providerPlugins 须为数组');
+  }
+  providerPlugins.forEach((spec, i) => {
+    if (spec === null || typeof spec !== 'object') {
+      throw new Error(`capability.create: providerPlugins[${i}] 须为对象`);
+    }
+    if (typeof spec.kind !== 'string' || spec.kind === '') {
+      throw new Error(`capability.create: providerPlugins[${i}].kind 须为非空字符串`);
+    }
+    if (typeof spec.create !== 'function') {
+      throw new Error(`capability.create: providerPlugins[${i}].create 须为函数`);
+    }
+  });
+  // 条件化门面校验：仅当有 provider 需要注册时才要求宿主门面（向后兼容旧 store）
+  if (providerPlugins.length > 0) {
+    assertStore(store, ['registerProvider'], 'capability.create');
+  }
 
   async function start() {
     const registered = [];
     const skipped = [];
+    const providerRegistered = [];
+    for (const spec of providerPlugins) {
+      store.registerProvider(spec.kind, { create: spec.create });  // registerProvider 为同步门面
+      providerRegistered.push(spec.kind);
+    }
     for (const defn of schemas()) {
       if (store.has(defn.name)) {
         skipped.push(defn.name);   // has 为同步门面
@@ -88,7 +112,7 @@ function create(store, opts = {}) {
       }
     }
     await store.configureResource({ providers, url, sign, schema });  // configureResource 为同步实现，await 兼容
-    return { registered, skipped };
+    return { registered, skipped, providerRegistered };
   }
 
   return {
