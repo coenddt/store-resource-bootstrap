@@ -1,0 +1,25 @@
+{
+  "name": "store-resource-bootstrap-node",
+  "version": "0.1.0",
+  "main": "src/index.js",
+  "files": ["src"],
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coenddt/store-resource-bootstrap.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "nodejs-store": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "nodejs-store": {
+      "optional": true
+    }
+  }
+}
