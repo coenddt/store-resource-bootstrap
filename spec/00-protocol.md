@@ -31,6 +31,7 @@
 ```jsonc
 {
   "providers": [ { "kind": "local", "options": { "root": "/data/resources" }, "priority": 0 } ],
+  "providerPlugins": [ { "kind": "oss", "create": "<provider 工厂函数 create(options)>" } ],  // 可选；缺省 []
   "url":  { "base": "https://cdn.example.com" },  // 可选；→ configureResource({url})。缺省 {}
   "sign": null,                                    // 可选；函数或 null。缺省 null → configureResource({sign})
   "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }  // 可选；缺省宿主同名
@@ -40,11 +41,12 @@
 | 字段 | 允许类型 / 取值 | 缺省 | 备注 |
 |---|---|---|---|
 | `providers` | **必填**，非空数组；每项 `{kind: 非空字符串, options?: 对象, priority?: 整数}` | 无（必填） | `kind` 须为宿主**已注册**的 provider（`local` / `s3` 内置；其余由接入方经宿主自备）。插件**不预检** kind 有效性，交宿主抛错 |
+| `providerPlugins` | 数组；每项 `{kind: 非空字符串, create: 函数}` | `[]` | provider 工厂注册表；`create(options) -> provider`。**非空时**要求宿主具 `registerProvider`（py `register_provider`）。插件**不预检** kind 冲突，交宿主注册表处置 |
 | `url` | 对象 | `{}` | 原样传 `configureResource` |
 | `sign` | 函数 \| `null` | `null` | 原样传 `configureResource` |
 | `schema` | 对象 | `{resource:'Resource',location:'ResourceLocation',binding:'ResourceBinding'}` | 三 schema 名映射；原样传 `configureResource` |
 
-- 顶层**仅允许** `providers` / `url` / `sign` / `schema` 四个键；出现未知键 → 抛 `Error`（禁静默忽略，对齐 no-error-masking）。
+- 顶层**仅允许** `providers` / `providerPlugins` / `url` / `sign` / `schema` 五个键；出现未知键 → 抛 `Error`（禁静默忽略，对齐 no-error-masking）。
 
 `adapter.download(store, opts)` 的 `opts`：
 
@@ -67,10 +69,11 @@ from store_resource_bootstrap import capability, adapter
 
 ### `start()` 固定序列（node；py 同构，门面名 snake_case）
 
-1. 逐表幂等注册（`has` / `register` **同步**调用，无 `await`）：
+1. 注册 `providerPlugins`（**同步**）：node `store.registerProvider(spec.kind, { create: spec.create })`；py `store.register_provider(spec.kind, SimpleNamespace(create=spec.create))`；**先于** `configureResource`；
+2. 逐表幂等注册（`has` / `register` **同步**调用，无 `await`）：
    `for (const defn of schemas()) { store.has(defn.name) ? skipped.push(defn.name) : (store.register(defn), registered.push(defn.name)) }`
-2. `await store.configureResource({ providers, url, sign, schema })`（**异步**；py 用 sync / async 兼容包装）；
-3. 返回 `{ registered: string[], skipped: string[] }`（可观测，禁静默）。
+3. `await store.configureResource({ providers, url, sign, schema })`（**异步**；py 用 sync / async 兼容包装）；
+4. 返回 `{ registered: string[], skipped: string[], providerRegistered: string[] }`（可观测，禁静默）。
 
 ### `reload()` 固定序列
 
@@ -84,7 +87,8 @@ from store_resource_bootstrap import capability, adapter
 2. `providers` 为非空数组，逐项按「配置形状」校验（`kind` 非空字符串、`options` 对象、`priority` 整数）；
 3. `url` 为对象；
 4. `sign` 为函数或 `null`；
-5. `schema` 为对象。
+5. `schema` 为对象；
+6. `providerPlugins` 缺省 `[]`；若给定须为数组，逐项 `kind` 非空字符串、`create` 函数；**当且仅当非空**时 `store` 须具 `registerProvider`（py `register_provider`）。
 
 ### 幂等
 
@@ -107,7 +111,7 @@ from store_resource_bootstrap import capability, adapter
 | `adapter.upload` · node | `upload(store)` → `async (input) => store.resourcePut(input)` | 薄透传，不改写入参 / 出参 |
 | `adapter.upload` · py | `upload(store)` → `async (input: dict) => await store.resource_put(**input)` | 薄透传，`input` 键为 py 原生（`file_name` / `mime` / `kind` / `bind` / `bytes`） |
 
-**宿主门面同步 / 异步分流**：`register` / `has` / `configureResource`（py `configure_resource`）为**同步**；`resourcePut` / `resourceOpen` / `queryOne`（py `resource_put` / `resource_open` / `query_one`）为**异步**。
+**宿主门面同步 / 异步分流**：`register` / `has` / `configureResource`（py `configure_resource`）/ `registerProvider`（py `register_provider`）为**同步**；`resourcePut` / `resourceOpen` / `queryOne`（py `resource_put` / `resource_open` / `query_one`）为**异步**。
 
 ## 错误语义
 
