@@ -25,11 +25,15 @@ test('conformance · schemas 深拷贝（改写不回写内部）', () => {
   assert.equal(capability.schemas()[0].fields._id.type, 'string');
 });
 
-for (const key of ['fresh', 'idempotent', 'defaults']) {
+for (const key of ['fresh', 'idempotent', 'defaults', 'schemas_disabled', 'custom_schemas', 'fields_passthrough']) {
   test(`conformance · capability.${key} 调用序列与返回逐位一致`, async () => {
     const entry = cases.capability[key];
     const store = mockStore(entry.seed);
-    const handle = capability.create(store, entry.opts);
+    // schemas_ref: 'canonical' → 用内置可选参考定义作为 opts.schemas 注入（缺省不注册）
+    const opts = entry.schemas_ref === 'canonical'
+      ? { ...entry.opts, schemas: cases.schemas.canonical }
+      : entry.opts;
+    const handle = capability.create(store, opts);
     const out = await handle.start();
     assert.deepEqual(store.calls, entry.expected_calls);
     assert.deepEqual(out, entry.expected_return);
@@ -44,6 +48,7 @@ test('conformance · capability.provider_plugins 前置注册与三元返回', a
     ...entry.opts,
     providerPlugins: entry.opts.providerPlugins.map((spec, i) => ({ kind: spec.kind, create: creates[i] })),
   };
+  if (entry.schemas_ref === 'canonical') opts.schemas = cases.schemas.canonical;
   const out = await capability.create(store, opts).start();
 
   // 每项 kind 前置注册，且 create 引用一致
@@ -86,8 +91,8 @@ test('conformance · adapter.download 正常路径', async () => {
   const store = mockStore();
   const resolve = adapter.download(store, c.opts);
   const out = await resolve({}, c.record, 'id1');
+  assert.equal(store.calls.length, 1);            // 仅一次 resourceOpen（不再自建 Resource 查询）
   assert.deepEqual(store.calls[0], c.expected_open_call);
-  assert.deepEqual(store.calls[1], c.expected_query_call);
   assert.equal(out.contentType, c.expected_result.contentType);
   assert.equal(out.fileName, c.expected_result.fileName);
   assert.equal(out.body.toString(), c.expected_result.body_text);
@@ -121,14 +126,14 @@ test('conformance · adapter.download 缺引用抛错且零资源调用', async 
 test('conformance · adapter.download mime / fileName 缺省兜底', async () => {
   const m = cases.adapter.mime_fallback;
   const s1 = mockStore();
-  s1.queryOne = async () => ({ ...m.meta });
+  s1.resourceOpen = async (id, opts) => ({ bytes: Buffer.from('hello'), ...m.open });
   const o1 = await adapter.download(s1, {})({}, { file: 'ref1' }, 'id1');
   assert.equal(o1.contentType, m.expected.contentType);
   assert.equal(o1.fileName, m.expected.fileName);
 
   const f = cases.adapter.filename_fallback;
   const s2 = mockStore();
-  s2.queryOne = async () => ({ ...f.meta });
+  s2.resourceOpen = async (id, opts) => ({ bytes: Buffer.from('hello'), ...f.open });
   const o2 = await adapter.download(s2, {})({}, { file: 'ref1' }, 'id1');
   assert.equal(o2.contentType, f.expected.contentType);
   assert.equal(o2.fileName, f.expected.fileName);

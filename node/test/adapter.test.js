@@ -5,16 +5,14 @@ const assert = require('node:assert/strict');
 const { adapter } = require('../src/index.js');
 const { mockStore } = require('./mock-store.js');
 
-const PROJECTION = 'Resource($condition: @c0) { _id, fileName, mime }';
-
 test('D1 download 正常路径', async () => {
   const store = mockStore();
   const out = await adapter.download(store)({}, { file: 'ref1' }, 'id1');
   assert.equal(Buffer.isBuffer(out.body), true);
   assert.equal(out.contentType, 'text/plain');
   assert.equal(out.fileName, 'a.txt');
-  assert.deepEqual(store.calls.find((c) => c[0] === 'resourceOpen'), ['resourceOpen', 'ref1', {}]);
-  assert.deepEqual(store.calls.find((c) => c[0] === 'queryOne'), ['queryOne', PROJECTION, { c0: { _id: 'ref1' } }]);
+  assert.equal(store.calls.length, 1);   // 仅 resourceOpen（元数据由宿主附带返回，不再自建 Resource 查询）
+  assert.deepEqual(store.calls[0], ['resourceOpen', 'ref1', {}]);
 });
 
 test('D2 自定义 field', async () => {
@@ -43,22 +41,22 @@ test('D5 引用为空串', async () => {
 
 test('D6 mime 缺失兜底', async () => {
   const store = mockStore();
-  store.queryOne = async () => ({ _id: 'ref1', mime: null, fileName: 'x' });
+  store.resourceOpen = async (id, opts) => ({ bytes: Buffer.from('hello'), fileName: 'x', mime: null });
   const out = await adapter.download(store)({}, { file: 'ref1' }, 'id');
   assert.equal(out.contentType, 'application/octet-stream');
 });
 
 test('D7 fileName 缺失兜底', async () => {
   const store = mockStore();
-  store.queryOne = async () => ({ _id: 'ref1', mime: 'text/plain' });
+  store.resourceOpen = async (id, opts) => ({ bytes: Buffer.from('hello'), mime: 'text/plain', fileName: null });
   const out = await adapter.download(store)({}, { file: 'ref1' }, 'id');
   assert.equal(out.fileName, 'ref1');
 });
 
 test('D8 构造期校验', () => {
   const s1 = mockStore();
-  delete s1.queryOne;
-  assert.throws(() => adapter.download(s1), /queryOne/);
+  delete s1.queryOne;                     // 无 queryOne 的宿主也应可 download（解耦核心断言）
+  assert.doesNotThrow(() => adapter.download(s1));
   const s2 = mockStore();
   delete s2.resourceOpen;
   assert.throws(() => adapter.download(s2), /resourceOpen/);

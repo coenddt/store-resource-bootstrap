@@ -1,6 +1,6 @@
 {
   "name": "store-resource-bootstrap-node",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "main": "src/index.js",
   "files": [
     "src"
@@ -20,7 +20,7 @@
     "@aws-sdk/client-s3": "^3.1146.0"
   },
   "peerDependencies": {
-    "nodejs-store": ">=3.0.0"
+    "nodejs-store": ">=4.3.0"
   },
   "peerDependenciesMeta": {
     "nodejs-store": {

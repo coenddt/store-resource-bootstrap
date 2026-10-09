@@ -1,6 +1,9 @@
-"""三 schema 定义（唯一事实源：spec/00-protocol.md 附录 A）。
+"""内置「可选参考」资源定义（三表）——库不再把它作为权威 schema 强制注册。
 
-逐字复制 01 执行文档 §4.8 的 JSON 数组；conformance A9 校验本常量与源契约深比较全等。
+资源三表（资源目录 / 存储位置 / 业务绑定）属资源能力自身的持久化模型；
+库只提供这份参考定义供开箱即用，是否注册、注册哪套，由接入方按需注入
+（`capability.create(store, {"schemas": capability.schemas()})` 或自有定义）。
+语义与 spec/00-protocol.md 附录 A 一致；conformance 校验本常量与之深比较全等。
 注意：Resource.idPrefix 必须为空串 ""（falsy）——宿主仅当真值才生成 _id，
 否则会为内容寻址资源生成随机 _id、破坏 resourceId = sha1 约定。
 """

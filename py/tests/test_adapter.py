@@ -6,8 +6,6 @@ import pytest
 from store_resource_bootstrap import adapter
 from mock_store import MockStore
 
-PROJECTION = "Resource($condition: @c0) { _id, fileName, mime }"
-
 
 def run(coro):
     return asyncio.run(coro)
@@ -22,8 +20,7 @@ def test_D1_download_normal():
     resolver = adapter.download(store)
     out = run(resolver({"headers": {}}, {"file": "ref1"}, "id1"))
     assert out == {"body": b"hello", "contentType": "text/plain", "fileName": "a.txt"}
-    assert ("resource_open", "ref1", {}) in store.calls
-    assert ("query_one", PROJECTION, {"c0": {"_id": "ref1"}}) in store.calls
+    assert store.calls == [("resource_open", "ref1", {})]   # 仅一次 resource_open（不再自建 Resource 查询）
 
 
 def test_D2_custom_field():
@@ -58,11 +55,10 @@ def test_D5_empty_ref():
 def test_D6_mime_fallback():
     store = _store()
 
-    async def query_one_mime_none(gql, params):
-        store.calls.append(("query_one", gql, params))
-        return {"_id": params["c0"]["_id"], "fileName": "a.txt", "mime": None}
+    async def open_mime_none(rid, **kw):
+        return {"bytes": b"hello", "fileName": "a.txt", "mime": None}
 
-    store.query_one = query_one_mime_none
+    store.resource_open = open_mime_none
     resolver = adapter.download(store)
     out = run(resolver({"headers": {}}, {"file": "ref1"}, "id"))
     assert out["contentType"] == "application/octet-stream"
@@ -71,11 +67,10 @@ def test_D6_mime_fallback():
 def test_D7_filename_fallback():
     store = _store()
 
-    async def query_one_no_name(gql, params):
-        store.calls.append(("query_one", gql, params))
-        return {"_id": params["c0"]["_id"], "mime": "text/plain"}
+    async def open_no_name(rid, **kw):
+        return {"bytes": b"hello", "mime": "text/plain", "fileName": None}
 
-    store.query_one = query_one_no_name
+    store.resource_open = open_no_name
     resolver = adapter.download(store)
     out = run(resolver({"headers": {}}, {"file": "ref9"}, "id"))
     assert out["fileName"] == "ref9"
@@ -85,9 +80,8 @@ def test_D8_construction_errors():
     with pytest.raises(ValueError):
         adapter.download(MockStore(), {"field": ""})
     no_query = _store()
-    no_query.query_one = None
-    with pytest.raises(ValueError):
-        adapter.download(no_query)
+    no_query.query_one = None            # 无 query_one 的宿主也应可 download（解耦核心断言）
+    assert adapter.download(no_query) is not None
     no_open = _store()
     no_open.resource_open = None
     with pytest.raises(ValueError):

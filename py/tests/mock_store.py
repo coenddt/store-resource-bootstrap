@@ -24,12 +24,10 @@ class MockStore:
 
     async def resource_open(self, rid, **kw):
         self.calls.append(("resource_open", rid, kw))
-        return {"bytes": b"hello", "resourceId": rid, "backend": "local", "key": "k"}
+        # 元数据（fileName/mime）由宿主 resource_open 附带返回（下载不再自建 Resource 查询）
+        return {"bytes": b"hello", "resourceId": rid, "backend": "local", "key": "k",
+                "fileName": "a.txt", "mime": "text/plain"}
 
     async def resource_put(self, **kw):
         self.calls.append(("resource_put", kw))
         return {"resourceId": "sha1", "sha1": "sha1", "locations": []}
-
-    async def query_one(self, gql, params):
-        self.calls.append(("query_one", gql, params))
-        return {"_id": params["c0"]["_id"], "fileName": "a.txt", "mime": "text/plain"}

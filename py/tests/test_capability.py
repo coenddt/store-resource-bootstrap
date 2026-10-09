@@ -94,9 +94,17 @@ def test_C8_url_and_sign_invalid():
 # ---- C9–C13：start / reload ----
 
 
-def test_C9_start_first_call():
+def test_C9_start_default_registers_nothing():
     store = _store()
     handle = capability.create(store, _ok_opts())
+    out = run(handle.start())
+    assert [c[0] for c in store.calls] == ["configure_resource"]
+    assert out == {"registered": [], "skipped": [], "providerRegistered": []}
+
+
+def test_C9b_start_with_injected_schemas():
+    store = _store()
+    handle = capability.create(store, _ok_opts(schemas=capability.schemas()))
     out = run(handle.start())
     assert [c[0] for c in store.calls] == ["register", "register", "register", "configure_resource"]
     assert [c[1] for c in store.calls[:3]] == NAMES
@@ -112,11 +120,37 @@ def test_C10_configure_resource_payload():
     assert cfg["url"] == {}
     assert cfg["sign"] is None
     assert cfg["schema"] == DEFAULT_SCHEMA_MAP
+    assert "fields" not in cfg                 # 未提供 fields 时载荷不带该键
+
+
+def test_C19_fields_passthrough():
+    store = _store()
+    fields = {
+        "resource": {"sha1": "contentHash", "size": None},
+        "location": {"backend": "store", "status": None},
+        "binding": {"businessTable": "entity", "userId": None},
+    }
+    run(capability.create(store, _ok_opts(fields=fields)).start())
+    cfg = store.calls[-1][1]
+    assert cfg["fields"] == fields             # 提供时逐位一致
+
+
+def test_C20_fields_invalid():
+    base = [("fields", 1, "fields"), ("fields", {"bogus": {}}, "fields"),
+            ("fields", {"resource": 1}, "fields"), ("fields", {"resource": {"bogus": "x"}}, "fields"),
+            ("fields", {"resource": {"sha1": None}}, "sha1"),
+            ("fields", {"location": {"backend": ""}}, "backend"),
+            ("fields", {"binding": {"userId": 1}}, "userId")]
+    for key, bad, hit in base:
+        store = _store()
+        with pytest.raises(ValueError, match=hit):
+            capability.create(store, _ok_opts(**{key: bad}))
+        assert store.calls == []
 
 
 def test_C11_start_idempotent():
     store = _store()
-    handle = capability.create(store, _ok_opts())
+    handle = capability.create(store, _ok_opts(schemas=capability.schemas()))
     run(handle.start())
     out2 = run(handle.start())
     assert out2 == {"registered": [], "skipped": NAMES, "providerRegistered": []}
@@ -126,7 +160,7 @@ def test_C11_start_idempotent():
 
 def test_C12_reload_equals_start():
     store = _store()
-    handle = capability.create(store, _ok_opts())
+    handle = capability.create(store, _ok_opts(schemas=capability.schemas()))
     run(handle.start())
     run(handle.reload())
     assert len([c for c in store.calls if c[0] == "register"]) == 3
@@ -164,6 +198,7 @@ def test_C14_provider_plugins_precede_register():
     handle = capability.create(store, {
         "providers": [{"kind": "local"}],
         "providerPlugins": [{"kind": "oss", "create": fn}],
+        "schemas": capability.schemas(),
     })
     out = run(handle.start())
     assert [c[0] for c in store.calls] == [
@@ -186,3 +221,26 @@ def test_C16_no_facade_required_when_absent_or_empty():
     store = _NoFacade()
     capability.create(store, {"providers": [{"kind": "local"}]})                          # 未传
     capability.create(store, {"providers": [{"kind": "local"}], "providerPlugins": []})   # 空数组
+
+
+# ---- C17–C18：schemas 注入点 ----
+
+
+def test_C17_schemas_invalid():
+    store = _store()
+    for bad in (1, [1], [{}]):
+        with pytest.raises(ValueError, match="schemas"):
+            capability.create(store, _ok_opts(schemas=bad))
+
+
+def test_C18_custom_schemas_registered_only():
+    store = _store()
+    defn = {
+        "name": "BizAsset", "collection": "biz_assets", "idPrefix": "ba", "timestamps": True,
+        "read": [], "write": [], "fields": {"_id": {"type": "string"}}, "relations": {}, "indexes": [],
+    }
+    handle = capability.create(store, _ok_opts(schemas=[defn]))
+    out = run(handle.start())
+    assert out["registered"] == ["BizAsset"]
+    assert [c[0] for c in store.calls] == ["register", "configure_resource"]
+    assert store.calls[0][1] == "BizAsset"

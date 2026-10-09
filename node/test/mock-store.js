@@ -25,15 +25,12 @@ function mockStore(seed = {}) {
     },
     async resourceOpen(id, opts) {
       calls.push(['resourceOpen', id, opts]);
-      return { bytes: Buffer.from('hello'), resourceId: id, backend: 'local', key: 'k' };
+      // 元数据（fileName/mime）由宿主 resourceOpen 附带返回（下载不再自建 Resource 查询）
+      return { bytes: Buffer.from('hello'), resourceId: id, backend: 'local', key: 'k', fileName: 'a.txt', mime: 'text/plain' };
     },
     async resourcePut(input) {
       calls.push(['resourcePut', input]);
       return { resourceId: 'sha1', sha1: 'sha1', locations: [] };
-    },
-    async queryOne(gql, params) {
-      calls.push(['queryOne', gql, params]);
-      return { _id: params.c0._id, fileName: 'a.txt', mime: 'text/plain' };
     },
   };
 }

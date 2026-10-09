@@ -38,11 +38,15 @@ def test_conformance_schemas_deepcopy():
     assert capability.schemas()[0]["fields"]["_id"]["type"] == "string"
 
 
-@pytest.mark.parametrize("key", ["fresh", "idempotent", "defaults"])
+@pytest.mark.parametrize("key", ["fresh", "idempotent", "defaults", "schemas_disabled", "custom_schemas", "fields_passthrough"])
 def test_conformance_capability_sequences(key):
     entry = CASES["capability"][key]
     store = MockStore(entry["seed"])
-    handle = capability.create(store, entry["opts"])
+    # schemas_ref: 'canonical' → 用内置可选参考定义作为 opts["schemas"] 注入（缺省不注册）
+    opts = dict(entry["opts"])
+    if entry.get("schemas_ref") == "canonical":
+        opts["schemas"] = CASES["schemas"]["canonical"]
+    handle = capability.create(store, opts)
     out = run(handle.start())
     assert store.calls == [tr(c) for c in entry["expected_calls"]]
     assert out == entry["expected_return"]
@@ -55,6 +59,8 @@ def test_conformance_capability_provider_plugins():
     creates = [(lambda options=None, i=i: {"kind": "stub", "i": i}) for i in range(len(specs))]
     opts = dict(entry["opts"])
     opts["providerPlugins"] = [{"kind": s["kind"], "create": creates[i]} for i, s in enumerate(specs)]
+    if entry.get("schemas_ref") == "canonical":
+        opts["schemas"] = CASES["schemas"]["canonical"]
 
     out = run(capability.create(store, opts).start())
 
@@ -86,8 +92,8 @@ def test_conformance_download_default():
     store = MockStore()
     resolve = adapter.download(store, c["opts"])
     out = run(resolve(None, c["record"], "id1"))
+    assert len(store.calls) == 1               # 仅一次 resource_open（不再自建 Resource 查询）
     assert store.calls[0] == tr(c["expected_open_call"])
-    assert store.calls[1] == tr(c["expected_query_call"])
     assert out["contentType"] == c["expected_result"]["contentType"]
     assert out["fileName"] == c["expected_result"]["fileName"]
     assert out["body"].decode() == c["expected_result"]["body_text"]
@@ -119,10 +125,10 @@ def test_conformance_download_meta_fallbacks():
     m = CASES["adapter"]["mime_fallback"]
     s1 = MockStore()
 
-    async def meta_m(gql, params):
-        return dict(m["meta"])
+    async def open_m(rid, **kw):
+        return {"bytes": b"hello", **m["open"]}
 
-    s1.query_one = meta_m
+    s1.resource_open = open_m
     o1 = run(adapter.download(s1, {})(None, {"file": "ref1"}, "id1"))
     assert o1["contentType"] == m["expected"]["contentType"]
     assert o1["fileName"] == m["expected"]["fileName"]
@@ -130,10 +136,10 @@ def test_conformance_download_meta_fallbacks():
     f = CASES["adapter"]["filename_fallback"]
     s2 = MockStore()
 
-    async def meta_f(gql, params):
-        return dict(f["meta"])
+    async def open_f(rid, **kw):
+        return {"bytes": b"hello", **f["open"]}
 
-    s2.query_one = meta_f
+    s2.resource_open = open_f
     o2 = run(adapter.download(s2, {})(None, {"file": "ref1"}, "id1"))
     assert o2["contentType"] == f["expected"]["contentType"]
     assert o2["fileName"] == f["expected"]["fileName"]

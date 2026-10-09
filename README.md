@@ -13,8 +13,10 @@ Optional **resource bootstrap plugin** for the common-store data-layer family (h
 
 The plugin does exactly two things and nothing else:
 
-1. **Capability bootstrap** — register the three schemas `Resource` / `ResourceLocation` / `ResourceBinding` and call the host store's existing `configureResource({ providers, url, sign, schema })`;
+1. **Capability bootstrap** — register the caller-**injected** schema definitions (`schemas`, optional; nothing is registered by default) and call the host store's existing `configureResource({ providers, url, sign, schema, fields })`;
 2. **Seam adaptation** — produce a store-api `fileResolver` (thin read-through) and a thin pass-through `resourcePut`.
+
+**Schema ownership**: the library ships **no authoritative resource schema** — business-entity schemas (e.g. `product.images` / `user.avatar`) are defined by the business layer and never touched here; the three resource tables (`Resource` / `ResourceLocation` / `ResourceBinding`, the persistence model of the resource capability itself) are provided only as an **optional reference** (`capability.schemas()`), and whether to register them is decided by `opts.schemas` (default: register nothing). The **column structure of the three resource tables is likewise business-definable**: their column names are not hard-coded in the host, but declared by the integrator via the `opts.fields` "logical role → physical field" mapping (default = canonical column names). The library only encapsulates the **generic code** for upload / download / storage — field naming and structure belong to the business layer, so the business data model is never coupled into the generic library.
 
 Three invariants: **zero semantic invention**, **zero host dependency**, **zero regression**. The plugin never `require`s / imports any host, skin or core package (**no third-party runtime dependencies by default**; the optional reference provider modules `oss` / `minio` need an S3-compatible SDK, declared as **optional dependencies** and **lazily loaded** — when not installed, the module still loads and `capability` / `adapter` and tests are unaffected; only actually calling that module's `create()` throws), never invents error prefixes or status codes (it throws plain errors), and never touches any sibling repository. It is exposed as two namespaces `capability` and `adapter`, and additionally ships an **optional reference provider namespace** `providers` (`oss` / `minio`, S3-compatible presets; SDK lazily loaded) for integrators to reference directly in `providerPlugins`. The single source of truth is [`spec/00-protocol.md`](./spec/00-protocol.md).
 
@@ -26,9 +28,10 @@ Three invariants: **zero semantic invention**, **zero host dependency**, **zero 
 const { init, store } = require('nodejs-store');       // host store (provided by the integrator)
 const { capability, adapter } = require('store-resource-bootstrap-node');
 
-// capability bootstrap: register the three schemas + configure the resource pool
+// capability bootstrap: inject schema definitions as needed (here the built-in reference set) + configure the resource pool
 const handle = capability.create(store, {
   providers: [{ kind: 'local', options: { root: '/data/resources' }, priority: 0 }],
+  schemas: capability.schemas(),  // default registers nothing; the business may pass its own definitions
 });
 await handle.start();
 // await handle.reload();  // re-run start() (host keeps the pools swapped atomically)
@@ -48,6 +51,7 @@ from store_resource_bootstrap import capability, adapter
 async def main():
     handle = capability.create(store, {
         "providers": [{"kind": "local", "options": {"root": "/data/resources"}, "priority": 0}],
+        "schemas": capability.schemas(),  # default registers nothing; the business may pass its own definitions
     })
     await handle.start()
     # await handle.reload()
@@ -64,9 +68,15 @@ asyncio.run(main())
 {
   "providers": [ { "kind": "local", "options": { "root": "/data/resources" }, "priority": 0 } ],
   "providerPlugins": [ { "kind": "oss", "create": "<provider factory create(options)>" } ],  // optional; default []
+  "schemas": [ "<schema definitions, see spec Appendix A / capability.schemas()>" ],  // optional; default [] (registers nothing)
   "url":  { "base": "https://cdn.example.com" },  // optional; → configureResource({url}). default {}
   "sign": null,                                    // optional; function or null. default null → configureResource({sign})
-  "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }  // optional; defaults to the host's same names
+  "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" },  // optional; defaults to the host's same names
+  "fields": {                                       // optional; logical role → physical field mapping. default = canonical
+    "resource": { "sha1": "sha1", "fileName": "fileName", "mime": "mime", "size": "size", "kind": "kind" },
+    "location": { "resourceId": "resourceId", "backend": "backend", "key": "key", "status": "status", "priority": "priority" },
+    "binding": { "resourceId": "resourceId", "businessTable": "businessTable", "businessId": "businessId", "userId": "userId" }
+  }
 }
 ```
 
@@ -74,30 +84,32 @@ asyncio.run(main())
 |---|---|---|---|
 | `providers` | **required**, non-empty array; each item `{kind: non-empty string, options?: object, priority?: int}` | none (required) | `kind` must be a provider **already registered** on the host (`local` / `s3` built in; others supplied by the integrator). The plugin does **not** pre-check `kind` validity — the host throws |
 | `providerPlugins` | array; each item `{kind: non-empty string, create: function}` | `[]` | provider factory registry; `create(options) -> provider`. **When non-empty**, the host must expose `registerProvider` (py `register_provider`). The plugin does **not** pre-check `kind` conflicts — the host registry handles them |
+| `schemas` | array \| `null` \| `false` | `[]` | **injection point for schema definitions to register** (the library ships no authoritative resource schema). Array items must be objects with a non-empty string `name`, registered in order (idempotent); `null` / `false` / default → **register nothing**. Business-entity schemas are not part of this — the business owns them |
 | `url` | object | `{}` | passed through to `configureResource` verbatim |
 | `sign` | function \| `null` | `null` | passed through to `configureResource` verbatim |
 | `schema` | object | `{resource:'Resource',location:'ResourceLocation',binding:'ResourceBinding'}` | three schema-name mappings; passed through to `configureResource` verbatim |
+| `fields` | object | canonical (above) | three-table **logical role → physical field** mapping; passed through to `configureResource({fields})` verbatim, letting the business define the resource-table column structure. Validation: unknown table / unknown role → throws; **required roles** (`resource.sha1`, `location.resourceId`/`backend`/`key`, `binding.resourceId`/`businessTable`/`businessId`) must be non-empty strings; **optional roles** are a non-empty string or `null` (`null` = skip that column). `_id` is not mappable (core identity; dedup is by `_id`). Passed through **only when provided** (default: not passed → host uses canonical, byte-for-byte compatible) |
 
-Only the five top-level keys above are allowed; any unknown key is a config error (throws, never silently ignored). See [`spec/00-protocol.md`](./spec/00-protocol.md) §Config shape / §Bootstrap rules for the full contract. The DDL boundary: the plugin **does not create tables** — the three schemas' DDL is covered by the integrator's existing `syncSchema` (node) / `load_defs` (py).
+Only the seven top-level keys above are allowed; any unknown key is a config error (throws, never silently ignored). See [`spec/00-protocol.md`](./spec/00-protocol.md) §Config shape / §Bootstrap rules for the full contract. The DDL boundary: the plugin **does not create tables** — whether/how to create tables is up to the integrator (its existing `syncSchema` (node) / `load_defs` (py)); `schemas` only `register`s definitions into the host schema registry and never triggers DDL.
 
 ## 4. Per-end contract table
 
 | Capability · Runtime | Signature | Return / semantics |
 |---|---|---|
-| `capability.schemas` · node | `schemas()` | `Array<object>` (the three tables, **deep-copied**; caller mutation does not affect the internal copy) |
+| `capability.schemas` · node | `schemas()` | `Array<object>`: the built-in **optional reference** definitions (the three tables, **deep-copied**; caller mutation does not affect the internal copy; the library does not force-register them) |
 | `capability.schemas` · py | `schemas()` | `list[dict]` (as above, deep-copied) |
 | `capability.create` · node | `create(store, opts)` | `{ async start(), async reload() }` |
-| `capability.create` · py | `create(store, opts=None)` | `_Handle` with `async start()` / `async reload()`; `opts` keys are **identical** to node (camelCase: `providers`/`providerPlugins`/`url`/`sign`/`schema`) |
-| `adapter.download` · node | `download(store, opts = {})` → `async (req, rec, id) => {body, contentType, fileName}` | store-api `fileResolver` contract; **camelCase keys** (aligned with `store-api/node` existing reads) |
-| `adapter.download` · py | `download(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `file_resolver` contract; `opts` keys same as node (`field` / `order`); **camelCase keys** (aligned with `store-api/py`'s `out.get("contentType")` / `out.get("fileName")`) |
+| `capability.create` · py | `create(store, opts=None)` | `_Handle` with `async start()` / `async reload()`; `opts` keys are **identical** to node (camelCase: `providers`/`providerPlugins`/`schemas`/`url`/`sign`/`schema`/`fields`) |
+| `adapter.download` · node | `download(store, opts = {})` → `async (req, rec, id) => {body, contentType, fileName}` | store-api `fileResolver` contract; **camelCase keys** (aligned with `store-api/node` existing reads). Bytes + metadata come from `resourceOpen` alone; `contentType` / `fileName` fall back when the returned `mime` / `fileName` is `null` (the plugin no longer calls `queryOne`) |
+| `adapter.download` · py | `download(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `file_resolver` contract; `opts` keys same as node (`field` / `order`); **camelCase keys** (aligned with `store-api/py`'s `out.get("contentType")` / `out.get("fileName")`). Same as node: reads only via `resource_open`, no `query_one` |
 | `adapter.upload` · node | `upload(store)` → `async (input) => store.resourcePut(input)` | thin pass-through, does not touch the write input/output |
 | `adapter.upload` · py | `upload(store)` → `async (input: dict) => await store.resource_put(**input)` | thin pass-through; `input` keys are py-native (`file_name` / `mime` / `kind` / `bind` / `bytes`) |
 
-`start()` runs a fixed sequence (node; py is isomorphic with snake_case facade names): ① register `providerPlugins` (**synchronous**, before `configureResource`), ② idempotently register each table (`has`/`register` are **synchronous**), ③ `await store.configureResource({ providers, url, sign, schema })` (**asynchronous**), ④ return `{ registered: string[], skipped: string[], providerRegistered: string[] }` (observable, never silent). `reload()` ≡ runs `start()` again.
+`start()` runs a fixed sequence (node; py is isomorphic with snake_case facade names): ① register `providerPlugins` (**synchronous**, before `configureResource`), ② idempotently register the effective `opts.schemas` set (`has`/`register` are **synchronous**; default `[]` → this step is a no-op), ③ `await store.configureResource({ providers, url, sign, schema, fields })` (**asynchronous**; `fields` included **only when provided**), ④ return `{ registered: string[], skipped: string[], providerRegistered: string[] }` (observable, never silent). `reload()` ≡ runs `start()` again.
 
 ## 5. First-wave scope and exclusions
 
-Included: three-schema bootstrap + seam adaptation for both runtimes (node / py).
+Included: optional reference schemas with opt-in registration + seam adaptation for both runtimes (node / py).
 
 Explicitly **excluded** in this phase (with rationale):
 

@@ -1,8 +1,8 @@
 {
-  "comment": "双端一致性用例：同一份 JSON，node:test 与 pytest 各自加载执行。双端命名差异以 {node, py} 表达；本文件不复制实现常量（三 schema 除外——其为唯一事实源的镜像）。",
+  "comment": "双端一致性用例：同一份 JSON，node:test 与 pytest 各自加载执行。双端命名差异以 {node, py} 表达；本文件不复制实现常量（三 schema 除外——其为内置可选参考定义的镜像）。",
   "facades": {
-    "node": ["has", "register", "configureResource", "resourceOpen", "queryOne", "resourcePut", "registerProvider"],
-    "py": ["has", "register", "configure_resource", "resource_open", "query_one", "resource_put", "register_provider"]
+    "node": ["has", "register", "configureResource", "resourceOpen", "resourcePut", "registerProvider"],
+    "py": ["has", "register", "configure_resource", "resource_open", "resource_put", "register_provider"]
   },
   "expect_error_class": { "node": "Error", "py": "ValueError" },
   "schemas": {
@@ -68,6 +68,7 @@
         "url": { "base": "https://cdn.example.com" },
         "sign": null
       },
+      "schemas_ref": "canonical",
       "seed": [],
       "expected_calls": [
         ["register", "Resource"],
@@ -84,6 +85,7 @@
     },
     "idempotent": {
       "opts": { "providers": [ { "kind": "local" } ] },
+      "schemas_ref": "canonical",
       "seed": ["Resource", "ResourceLocation", "ResourceBinding"],
       "expected_calls": [
         ["configureResource", {
@@ -99,9 +101,6 @@
       "opts": { "providers": [ { "kind": "local" } ] },
       "seed": [],
       "expected_calls": [
-        ["register", "Resource"],
-        ["register", "ResourceLocation"],
-        ["register", "ResourceBinding"],
         ["configureResource", {
           "providers": [ { "kind": "local" } ],
           "url": {},
@@ -109,13 +108,77 @@
           "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
         }]
       ],
-      "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [], "providerRegistered": [] }
+      "expected_return": { "registered": [], "skipped": [], "providerRegistered": [] }
+    },
+    "schemas_disabled": {
+      "opts": { "providers": [ { "kind": "local" } ], "schemas": null },
+      "seed": [],
+      "expected_calls": [
+        ["configureResource", {
+          "providers": [ { "kind": "local" } ],
+          "url": {},
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
+        }]
+      ],
+      "expected_return": { "registered": [], "skipped": [], "providerRegistered": [] }
+    },
+    "custom_schemas": {
+      "opts": {
+        "providers": [ { "kind": "local" } ],
+        "schemas": [
+          {
+            "name": "BizAsset", "collection": "biz_assets", "idPrefix": "ba", "timestamps": true,
+            "read": [], "write": [],
+            "fields": { "_id": { "type": "string" }, "resourceId": { "type": "string" } },
+            "relations": {},
+            "indexes": [ { "keys": { "resourceId": 1 }, "options": {} } ]
+          }
+        ]
+      },
+      "seed": [],
+      "expected_calls": [
+        ["register", "BizAsset"],
+        ["configureResource", {
+          "providers": [ { "kind": "local" } ],
+          "url": {},
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
+        }]
+      ],
+      "expected_return": { "registered": ["BizAsset"], "skipped": [], "providerRegistered": [] }
+    },
+    "fields_passthrough": {
+      "opts": {
+        "providers": [ { "kind": "local" } ],
+        "fields": {
+          "resource": { "sha1": "contentHash", "fileName": "name", "mime": "contentType", "size": null, "kind": null },
+          "location": { "backend": "store", "key": "objectKey", "status": null },
+          "binding": { "businessTable": "entity", "userId": null }
+        }
+      },
+      "seed": [],
+      "expected_calls": [
+        ["configureResource", {
+          "providers": [ { "kind": "local" } ],
+          "url": {},
+          "sign": null,
+          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" },
+          "fields": {
+            "resource": { "sha1": "contentHash", "fileName": "name", "mime": "contentType", "size": null, "kind": null },
+            "location": { "backend": "store", "key": "objectKey", "status": null },
+            "binding": { "businessTable": "entity", "userId": null }
+          }
+        }]
+      ],
+      "expected_return": { "registered": [], "skipped": [], "providerRegistered": [] }
     },
     "provider_plugins": {
       "opts": {
         "providers": [ { "kind": "local" } ],
         "providerPlugins": [ { "kind": "oss" }, { "kind": "minio" } ]
       },
+      "schemas_ref": "canonical",
       "seed": [],
       "expected_registered_kinds": ["oss", "minio"],
       "expected_return_rest": {
@@ -144,7 +207,17 @@
       { "name": "provider_plugins_not_array", "opts": { "providers": [ { "kind": "local" } ], "providerPlugins": 1 },                          "error_contains": "providerPlugins", "expected_call_count": 0 },
       { "name": "provider_plugins_bad_item",  "opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ 1 ] },                        "error_contains": "providerPlugins", "expected_call_count": 0 },
       { "name": "provider_plugins_bad_kind",  "opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ { "kind": "" } ] },           "error_contains": "kind",            "expected_call_count": 0 },
-      { "name": "provider_plugins_bad_create","opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ { "kind": "oss", "create": "x" } ] }, "error_contains": "create",  "expected_call_count": 0 }
+      { "name": "provider_plugins_bad_create","opts": { "providers": [ { "kind": "local" } ], "providerPlugins": [ { "kind": "oss", "create": "x" } ] }, "error_contains": "create",  "expected_call_count": 0 },
+      { "name": "schemas_not_array",       "opts": { "providers": [ { "kind": "local" } ], "schemas": 1 },          "error_contains": "schemas", "expected_call_count": 0 },
+      { "name": "schemas_bad_item",        "opts": { "providers": [ { "kind": "local" } ], "schemas": [ 1 ] },       "error_contains": "schemas", "expected_call_count": 0 },
+      { "name": "schemas_bad_name",        "opts": { "providers": [ { "kind": "local" } ], "schemas": [ { "collection": "x" } ] }, "error_contains": "schemas", "expected_call_count": 0 },
+      { "name": "fields_not_object",       "opts": { "providers": [ { "kind": "local" } ], "fields": 1 },                                          "error_contains": "fields",   "expected_call_count": 0 },
+      { "name": "fields_unknown_table",    "opts": { "providers": [ { "kind": "local" } ], "fields": { "bogus": {} } },                            "error_contains": "fields",   "expected_call_count": 0 },
+      { "name": "fields_table_not_object", "opts": { "providers": [ { "kind": "local" } ], "fields": { "resource": 1 } },                           "error_contains": "fields",   "expected_call_count": 0 },
+      { "name": "fields_unknown_role",     "opts": { "providers": [ { "kind": "local" } ], "fields": { "resource": { "bogus": "x" } } },            "error_contains": "fields",   "expected_call_count": 0 },
+      { "name": "fields_required_null",    "opts": { "providers": [ { "kind": "local" } ], "fields": { "resource": { "sha1": null } } },            "error_contains": "sha1",     "expected_call_count": 0 },
+      { "name": "fields_required_empty",   "opts": { "providers": [ { "kind": "local" } ], "fields": { "location": { "backend": "" } } },           "error_contains": "backend",  "expected_call_count": 0 },
+      { "name": "fields_optional_bad",     "opts": { "providers": [ { "kind": "local" } ], "fields": { "binding": { "userId": 1 } } },              "error_contains": "userId",   "expected_call_count": 0 }
     ]
   },
   "adapter": {
@@ -152,8 +225,7 @@
       "opts": {},
       "record": { "file": "ref1" },
       "expected_result": { "contentType": "text/plain", "fileName": "a.txt", "body_text": "hello" },
-      "expected_open_call": ["resourceOpen", "ref1", {}],
-      "expected_query_call": ["queryOne", "Resource($condition: @c0) { _id, fileName, mime }", { "c0": { "_id": "ref1" } }]
+      "expected_open_call": ["resourceOpen", "ref1", {}]
     },
     "download_field": {
       "opts": { "field": "coverId" },
@@ -171,11 +243,11 @@
       { "name": "null_record", "record": null,              "error_contains": "file" }
     ],
     "mime_fallback": {
-      "meta": { "mime": null, "fileName": "a.txt" },
+      "open": { "mime": null, "fileName": "a.txt" },
       "expected": { "contentType": "application/octet-stream", "fileName": "a.txt" }
     },
     "filename_fallback": {
-      "meta": { "mime": "text/plain" },
+      "open": { "mime": "text/plain", "fileName": null },
       "expected": { "contentType": "text/plain", "fileName": "ref1" }
     },
     "upload": {
