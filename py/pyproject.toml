@@ -1,6 +1,6 @@
 [project]
 name = "store-resource-bootstrap-py"
-version = "0.3.0"
+version = "0.3.1"
 description = "Optional resource bootstrap plugin for common-store: registers caller-injected schemas (optional; the three resource schemas ship as an optional reference, not force-registered), wires the host resource capability (providers / url / sign) and produces the store-api fileResolver seam, for py-store hosts"
 requires-python = ">=3.10"
 license = { text = "MIT" }

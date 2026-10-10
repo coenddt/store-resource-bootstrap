@@ -14,7 +14,7 @@ Optional **resource bootstrap plugin** for the common-store data-layer family (h
 The plugin does exactly two things and nothing else:
 
 1. **Capability bootstrap** — register the caller-**injected** schema definitions (`schemas`, optional; nothing is registered by default) and call the host store's existing `configureResource({ providers, url, sign, schema, fields })`;
-2. **Seam adaptation** — produce a store-api `fileResolver` (thin read-through) and a thin pass-through `resourcePut`.
+2. **Seam adaptation** — produce a store-api `fileResolver` (`download`, thin read-through), an `uploadResolver` (upload seam) and a thin pass-through `resourcePut` (`upload`).
 
 **Schema ownership**: the library ships **no authoritative resource schema** — business-entity schemas (e.g. `product.images` / `user.avatar`) are defined by the business layer and never touched here; the three resource tables (`Resource` / `ResourceLocation` / `ResourceBinding`, the persistence model of the resource capability itself) are provided only as an **optional reference** (`capability.schemas()`), and whether to register them is decided by `opts.schemas` (default: register nothing). The **column structure of the three resource tables is likewise business-definable**: their column names are not hard-coded in the host, but declared by the integrator via the `opts.fields` "logical role → physical field" mapping (default = canonical column names). The library only encapsulates the **generic code** for upload / download / storage — field naming and structure belong to the business layer, so the business data model is never coupled into the generic library.
 
@@ -39,6 +39,8 @@ await handle.start();
 // seam adaptation: a store-api fileResolver (GET /{resource}/:id/file)
 const fileResolver = adapter.download(store);
 // const put = adapter.upload(store);  // thin pass-through of store.resourcePut(input)
+// seam adaptation: a store-api uploadResolver (POST /{resource}/:id/file)
+const uploadResolver = adapter.uploadResolver(store);
 ```
 
 ### Python (`store-resource-bootstrap-py`)
@@ -58,6 +60,7 @@ async def main():
 
     file_resolver = adapter.download(store)
     # put = adapter.upload(store)  # thin pass-through of store.resource_put(**input)
+    upload_resolver = adapter.upload_resolver(store)
 
 asyncio.run(main())
 ```
@@ -104,6 +107,8 @@ Only the seven top-level keys above are allowed; any unknown key is a config err
 | `adapter.download` · py | `download(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `file_resolver` contract; `opts` keys same as node (`field` / `order`); **camelCase keys** (aligned with `store-api/py`'s `out.get("contentType")` / `out.get("fileName")`). Same as node: reads only via `resource_open`, no `query_one` |
 | `adapter.upload` · node | `upload(store)` → `async (input) => store.resourcePut(input)` | thin pass-through, does not touch the write input/output |
 | `adapter.upload` · py | `upload(store)` → `async (input: dict) => await store.resource_put(**input)` | thin pass-through; `input` keys are py-native (`file_name` / `mime` / `kind` / `bind` / `bytes`) |
+| `adapter.uploadResolver` · node | `uploadResolver(store, opts = {})` → `async (req, rec, id) => { ref }` | store-api `uploadResolver` contract; `req.body` is the skin-buffered `Buffer` |
+| `adapter.uploadResolver` · py | `upload_resolver(store, opts=None)` → `async (request, rec, rid) -> dict` | store-api py `upload_resolver` contract; `request` accepts Starlette Request / dict; `opts` keys same as node (`kind` / `bind`) |
 
 `start()` runs a fixed sequence (node; py is isomorphic with snake_case facade names): ① register `providerPlugins` (**synchronous**, before `configureResource`), ② idempotently register the effective `opts.schemas` set (`has`/`register` are **synchronous**; default `[]` → this step is a no-op), ③ `await store.configureResource({ providers, url, sign, schema, fields })` (**asynchronous**; `fields` included **only when provided**), ④ return `{ registered: string[], skipped: string[], providerRegistered: string[] }` (observable, never silent). `reload()` ≡ runs `start()` again.
 
