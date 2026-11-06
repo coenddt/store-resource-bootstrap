@@ -75,8 +75,9 @@ test('C9b start() 注入 schemas 时注册三表', async () => {
     skipped: [],
     providerRegistered: [],
   });
-  assert.deepEqual(store.calls.map((c) => c[0]), ['register', 'register', 'register', 'configureResource']);
-  assert.deepEqual(store.calls.slice(0, 3).map((c) => c[1]), ['Resource', 'ResourceLocation', 'ResourceBinding']);
+  // configureResource 先于 schema 注册：它是唯一可能失败的步骤，前置 ⇒ 失败零 schema 副作用
+  assert.deepEqual(store.calls.map((c) => c[0]), ['configureResource', 'register', 'register', 'register']);
+  assert.deepEqual(store.calls.slice(1).map((c) => c[1]), ['Resource', 'ResourceLocation', 'ResourceBinding']);
 });
 
 test('C10 configureResource 入参（显式）', async () => {
@@ -174,7 +175,7 @@ test('C14 providerPlugins 前置注册', async () => {
     providerPlugins: [{ kind: 'oss', create: fn }],
     schemas: capability.schemas(),
   }).start();
-  assert.deepEqual(store.calls.map((c) => c[0]), ['registerProvider', 'register', 'register', 'register', 'configureResource']);
+  assert.deepEqual(store.calls.map((c) => c[0]), ['registerProvider', 'configureResource', 'register', 'register', 'register']);
   assert.equal(store.calls[0][1], 'oss');
   assert.equal(store.calls[0][2].create, fn);
   assert.deepEqual(out.providerRegistered, ['oss']);
@@ -214,6 +215,20 @@ test('C18 schemas 注入自定义定义只注册该定义', async () => {
   };
   const out = await capability.create(store, { providers: [{ kind: 'local' }], schemas: [defn] }).start();
   assert.deepEqual(out.registered, ['BizAsset']);
-  assert.deepEqual(store.calls.map((c) => c[0]), ['register', 'configureResource']);
-  assert.equal(store.calls[0][1], 'BizAsset');
+  assert.deepEqual(store.calls.map((c) => c[0]), ['configureResource', 'register']);
+  assert.equal(store.calls[1][1], 'BizAsset');
+});
+
+test('C19 configureResource 失败 ⇒ schema 零注册（start 失败无半配置）', async () => {
+  const store = mockStore();
+  store.configureResource = () => {
+    store.calls.push(['configureResource']);
+    throw new Error('provider kind 未知');
+  };
+  const handle = capability.create(store, {
+    providers: [{ kind: 'local' }],
+    schemas: capability.schemas(),
+  });
+  await assert.rejects(() => handle.start(), /provider kind 未知/);
+  assert.deepEqual(store.calls.map((c) => c[0]), ['configureResource'], '失败后不得留下任何 register');
 });

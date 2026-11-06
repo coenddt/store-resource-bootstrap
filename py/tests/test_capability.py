@@ -106,8 +106,9 @@ def test_C9b_start_with_injected_schemas():
     store = _store()
     handle = capability.create(store, _ok_opts(schemas=capability.schemas()))
     out = run(handle.start())
-    assert [c[0] for c in store.calls] == ["register", "register", "register", "configure_resource"]
-    assert [c[1] for c in store.calls[:3]] == NAMES
+    # configure_resource 先于 schema 注册：它是唯一可能失败的步骤，前置 ⇒ 失败零 schema 副作用
+    assert [c[0] for c in store.calls] == ["configure_resource", "register", "register", "register"]
+    assert [c[1] for c in store.calls[1:]] == NAMES
     assert out == {"registered": NAMES, "skipped": [], "providerRegistered": []}
 
 
@@ -115,7 +116,7 @@ def test_C10_configure_resource_payload():
     store = _store()
     handle = capability.create(store, _ok_opts())
     run(handle.start())
-    cfg = store.calls[-1][1]
+    cfg = store.calls[0][1]
     assert cfg["providers"] == [{"kind": "local"}]
     assert cfg["url"] == {}
     assert cfg["sign"] is None
@@ -202,7 +203,7 @@ def test_C14_provider_plugins_precede_register():
     })
     out = run(handle.start())
     assert [c[0] for c in store.calls] == [
-        "register_provider", "register", "register", "register", "configure_resource"
+        "register_provider", "configure_resource", "register", "register", "register"
     ]
     assert store.calls[0][1] == "oss"
     assert store.calls[0][2].create is fn
@@ -242,5 +243,18 @@ def test_C18_custom_schemas_registered_only():
     handle = capability.create(store, _ok_opts(schemas=[defn]))
     out = run(handle.start())
     assert out["registered"] == ["BizAsset"]
-    assert [c[0] for c in store.calls] == ["register", "configure_resource"]
-    assert store.calls[0][1] == "BizAsset"
+    assert [c[0] for c in store.calls] == ["configure_resource", "register"]
+    assert store.calls[1][1] == "BizAsset"
+
+
+def test_C19_configure_failure_leaves_no_schema_registration():
+    """configure_resource 失败 ⇒ schema 零注册（start 失败无半配置）。"""
+    store = _store()
+    def boom(payload):
+        store.calls.append(("configure_resource", payload))
+        raise RuntimeError("provider kind 未知")
+    store.configure_resource = boom
+    handle = capability.create(store, _ok_opts(schemas=capability.schemas()))
+    with pytest.raises(RuntimeError, match="provider kind 未知"):
+        run(handle.start())
+    assert [c[0] for c in store.calls] == ["configure_resource"]

@@ -71,15 +71,15 @@
       "schemas_ref": "canonical",
       "seed": [],
       "expected_calls": [
-        ["register", "Resource"],
-        ["register", "ResourceLocation"],
-        ["register", "ResourceBinding"],
         ["configureResource", {
           "providers": [ { "kind": "local", "options": { "root": "/data/resources" }, "priority": 0 } ],
           "url": { "base": "https://cdn.example.com" },
           "sign": null,
           "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
-        }]
+        }],
+        ["register", "Resource"],
+        ["register", "ResourceLocation"],
+        ["register", "ResourceBinding"]
       ],
       "expected_return": { "registered": ["Resource", "ResourceLocation", "ResourceBinding"], "skipped": [], "providerRegistered": [] }
     },
@@ -138,13 +138,13 @@
       },
       "seed": [],
       "expected_calls": [
-        ["register", "BizAsset"],
         ["configureResource", {
           "providers": [ { "kind": "local" } ],
           "url": {},
           "sign": null,
           "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
-        }]
+        }],
+        ["register", "BizAsset"]
       ],
       "expected_return": { "registered": ["BizAsset"], "skipped": [], "providerRegistered": [] }
     },
@@ -186,12 +186,9 @@
         "skipped": []
       },
       "expected_tail_calls": [
-        ["configureResource", {
-          "providers": [ { "kind": "local" } ],
-          "url": {},
-          "sign": null,
-          "schema": { "resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding" }
-        }]
+        ["register", "Resource"],
+        ["register", "ResourceLocation"],
+        ["register", "ResourceBinding"]
       ]
     },
     "invalid": [
