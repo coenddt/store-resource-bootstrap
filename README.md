@@ -11,10 +11,12 @@
 - Seven configuration keys, zero host imports: the `store` instance is passed in as an argument.
 - No DDL, no HTTP routes, no status codes: the plugin wires, the host stores, the skin exposes.
 
+> Chinese docs: [README.zh-CN.md](./README.zh-CN.md)
+
 | Runtime | Package | Version | Import | Host compatibility | Engine floor |
 |---|---|---|---|---|---|
-| Node | `store-resource-bootstrap-node` | **0.3.3** | `require('store-resource-bootstrap-node')` | `nodejs-store >= 4.3.0`, optional peer | Node >= 18 |
-| Python | `store-resource-bootstrap-py` | **0.3.3** | `from store_resource_bootstrap import capability, adapter` | `py-store >= 4.3.0` compatibility floor | Python >= 3.10 |
+| Node | `store-resource-bootstrap-node` | **0.3.4** | `require('store-resource-bootstrap-node')` | `nodejs-store >= 4.3.0`, optional peer | Node >= 18 |
+| Python | `store-resource-bootstrap-py` | **0.3.4** | `from store_resource_bootstrap import capability, adapter` | `py-store >= 4.3.0` compatibility floor | Python >= 3.10 |
 
 ## Three services, three ways to sign a file URL
 
@@ -83,10 +85,10 @@ Both runtimes throw plain `Error` / `ValueError` with a message naming the offen
 ## Run it
 
 ```bash
-# Node — package name verified against node/package.json 0.3.3
+# Node — package name verified against node/package.json 0.3.4
 npm i store-resource-bootstrap-node
 
-# Python — package name verified against py/pyproject.toml 0.3.3
+# Python — package name verified against py/pyproject.toml 0.3.4
 pip install store-resource-bootstrap-py
 ```
 
