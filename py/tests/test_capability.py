@@ -258,3 +258,14 @@ def test_C19_configure_failure_leaves_no_schema_registration():
     with pytest.raises(RuntimeError, match="provider kind 未知"):
         run(handle.start())
     assert [c[0] for c in store.calls] == ["configure_resource"]
+
+
+def test_reference_schema_read_is_unconfigured():
+    """参考三表：read 未配置（None）= 不限制（走 unconfigured_policy 缺省 open）；
+    write 空名单 = 显式拒写；关系读同样未配置。"""
+    defs = {d["name"]: d for d in capability.schemas()}
+    for name in ("Resource", "ResourceLocation", "ResourceBinding"):
+        assert defs[name]["read"] is None
+        assert defs[name]["write"] == []
+    assert defs["ResourceLocation"]["relations"]["resource"]["read"] is None
+    assert defs["ResourceBinding"]["relations"]["resource"]["read"] is None
