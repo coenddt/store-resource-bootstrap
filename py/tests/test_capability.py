@@ -238,6 +238,8 @@ def test_C18_custom_schemas_registered_only():
     store = _store()
     defn = {
         "name": "BizAsset", "collection": "biz_assets", "idPrefix": "ba", "timestamps": True,
+        # 用例只验证「自定义定义原样透传注册」，read/write 取值不参与断言；
+        # 此处保留空名单即「显式拒绝」，与参考 schema 的 read: None 无关。
         "read": [], "write": [], "fields": {"_id": {"type": "string"}}, "relations": {}, "indexes": [],
     }
     handle = capability.create(store, _ok_opts(schemas=[defn]))

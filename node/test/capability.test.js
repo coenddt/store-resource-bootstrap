@@ -211,6 +211,8 @@ test('C18 schemas 注入自定义定义只注册该定义', async () => {
   const store = mockStore();
   const defn = {
     name: 'BizAsset', collection: 'biz_assets', idPrefix: 'ba', timestamps: true,
+    // 用例只验证「自定义定义原样透传注册」，read/write 取值不参与断言；
+    // 此处保留空名单即「显式拒绝」，与参考 schema 的 read: null 无关。
     read: [], write: [], fields: { _id: { type: 'string' } }, relations: {}, indexes: [],
   };
   const out = await capability.create(store, { providers: [{ kind: 'local' }], schemas: [defn] }).start();
