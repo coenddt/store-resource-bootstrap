@@ -32,7 +32,7 @@
 
 插件做两件事，顺序就是名字的顺序：
 
-1. **能力引导** —— 幂等注册**你注入**的 schema 定义，然后调用宿主既有的资源门面 `configureResource({ providers, url, sign, schema, fields })`。
+1. **能力引导** —— 先把 `providerPlugins` 的工厂注册进宿主，再调用宿主既有的资源门面 `configureResource({ providers, url, sign, schema, fields })`，最后幂等注册**你注入**的 schema 定义（`configureResource` 是唯一会因宿主语义校验失败的一步，放在注册 schema 之前 ⇒ 失败时不留空表）。
 2. **接缝适配** —— 产出皮所需的 `download` / `upload` / `uploadResolver` 函数，形状正好是 store-api 既有文件子路由期待的样子。
 
 它**不带权威资源 schema**、**不建表**、**不暴露 HTTP 路由**。这三件事分别属于业务、宿主与皮。

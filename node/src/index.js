@@ -160,13 +160,19 @@ function create(store, opts = {}) {
   }
 
   async function start() {
-    const registered = [];
-    const skipped = [];
     const providerRegistered = [];
     for (const spec of providerPlugins) {
-      store.registerProvider(spec.kind, { create: spec.create });  // registerProvider 为同步门面
+      store.registerProvider(spec.kind, { create: spec.create });  // configure 的前置，必须最先
       providerRegistered.push(spec.kind);
     }
+    const cfg = { providers, url, sign, schema };
+    if (fields !== null) cfg.fields = fields;  // 仅在提供 fields 时带该键（保持旧调用逐位一致）
+    // configureResource 是唯一可能因宿主语义校验失败的一步，且宿主「整体替换 _pool」
+    // （失败保留旧池）。放在 schema 注册之前 ⇒ 失败时不会留下新注册的空表（零 schema 副作用）；
+    // provider 注册是它的前置且幂等，无法后置。
+    await store.configureResource(cfg);
+    const registered = [];
+    const skipped = [];
     for (const defn of effectiveSchemas) {
       if (store.has(defn.name)) {
         skipped.push(defn.name);   // has 为同步门面
@@ -175,9 +181,6 @@ function create(store, opts = {}) {
         registered.push(defn.name);
       }
     }
-    const cfg = { providers, url, sign, schema };
-    if (fields !== null) cfg.fields = fields;  // 仅在提供 fields 时带该键（保持旧调用逐位一致）
-    await store.configureResource(cfg);  // configureResource 为同步实现，await 兼容
     return { registered, skipped, providerRegistered };
   }
 

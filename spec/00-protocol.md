@@ -92,10 +92,10 @@ from store_resource_bootstrap import capability, adapter
 
 ### `start()` 固定序列（node；py 同构，门面名 snake_case）
 
-1. 注册 `providerPlugins`（**同步**）：node `store.registerProvider(spec.kind, { create: spec.create })`；py `store.register_provider(spec.kind, SimpleNamespace(create=spec.create))`；**先于** `configureResource`；
-2. 按 `opts.schemas` 生效集逐表幂等注册（`has` / `register` **同步**调用，无 `await`；缺省 `[]` → 本步空转）：
+1. 注册 `providerPlugins`（**同步**）：node `store.registerProvider(spec.kind, { create: spec.create })`；py `store.register_provider(spec.kind, SimpleNamespace(create=spec.create))`；**先于** `configureResource`（它是 configure 的前置且幂等，无法后置）；
+2. `await store.configureResource({ providers, url, sign, schema })`（**异步**；py 用 sync / async 兼容包装）。它是唯一可能因宿主语义校验失败的一步，且宿主整体替换 `_pool`（失败保留旧池）；**先于** schema 注册 ⇒ 失败时不留新注册的空表；
+3. 按 `opts.schemas` 生效集逐表幂等注册（`has` / `register` **同步**调用，无 `await`；缺省 `[]` → 本步空转）：
    `for (const defn of schemas) { store.has(defn.name) ? skipped.push(defn.name) : (store.register(defn), registered.push(defn.name)) }`
-3. `await store.configureResource({ providers, url, sign, schema })`（**异步**；py 用 sync / async 兼容包装）；
 4. 返回 `{ registered: string[], skipped: string[], providerRegistered: string[] }`（可观测，禁静默）。
 
 ### `reload()` 固定序列

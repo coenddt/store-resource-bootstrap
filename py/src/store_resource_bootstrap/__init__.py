@@ -88,19 +88,11 @@ class _Handle:
         self._opts = opts
 
     async def start(self):
-        registered = []
-        skipped = []
         provider_registered = []
         for spec in self._opts["providerPlugins"]:
             # 宿主 py 端 register_provider 校验 hasattr(mod, "create")，须传具属性对象
             self._store.register_provider(spec["kind"], SimpleNamespace(create=spec["create"]))
             provider_registered.append(spec["kind"])
-        for defn in self._opts["schemas"]:
-            if self._store.has(defn["name"]):      # has 为同步门面
-                skipped.append(defn["name"])
-            else:
-                self._store.register(defn)         # register 为同步门面，幂等
-                registered.append(defn["name"])
         payload = {
             "providers": self._opts["providers"],
             "url": self._opts["url"],
@@ -109,7 +101,18 @@ class _Handle:
         }
         if self._opts["fields"] is not None:
             payload["fields"] = self._opts["fields"]  # 仅在提供 fields 时带该键（保持旧调用逐位一致）
-        await _call(self._store.configure_resource, payload)  # configure_resource 为同步实现，_call 兼容
+        # configure_resource 是唯一可能因宿主语义校验失败的一步，且宿主「整体替换 _pool」
+        # （失败保留旧池）。放在 schema 注册之前 ⇒ 失败时不会留下新注册的空表（零 schema 副作用）；
+        # provider 注册是它的前置且幂等，无法后置。
+        await _call(self._store.configure_resource, payload)
+        registered = []
+        skipped = []
+        for defn in self._opts["schemas"]:
+            if self._store.has(defn["name"]):      # has 为同步门面
+                skipped.append(defn["name"])
+            else:
+                self._store.register(defn)         # register 为同步门面，幂等
+                registered.append(defn["name"])
         return {"registered": registered, "skipped": skipped, "providerRegistered": provider_registered}
 
     async def reload(self):

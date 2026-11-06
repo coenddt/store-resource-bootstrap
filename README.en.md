@@ -32,7 +32,7 @@ The bytes were never the problem. They live where they live. What is missing is 
 
 The plugin does two things, in the order their names imply:
 
-1. **Capability bootstrap** — idempotently register the schema definitions *you inject*, then call the host's existing resource façade `configureResource({ providers, url, sign, schema, fields })`.
+1. **Capability bootstrap** — install the `providerPlugins` factories into the host synchronously, call the host's existing resource façade `configureResource({ providers, url, sign, schema, fields })`, then idempotently `register` the schema definitions *you inject*.
 2. **Seam adaptation** — produce the `download` / `upload` / `uploadResolver` functions that a skin needs, shaped exactly like store-api's existing file sub-route expects.
 
 It ships **no authoritative resource schema**, creates **no tables**, and exposes **no HTTP route**. Those belong to the business, the host, and the skin respectively.
