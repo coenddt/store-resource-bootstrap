@@ -11,7 +11,9 @@
 const RESOURCE_SCHEMAS = [
   {
     name: 'Resource', collection: 'resources', idPrefix: '', timestamps: true,
-    read: [], write: [],
+    // read 未配置（null）= 不限制，走宿主 unconfiguredPolicy 缺省 open；
+    // write: [] 为显式拒写（资源行只由 internal 上传流程写入），语义见 spec 附录 A。
+    read: null, write: [],
     fields: {
       _id:      { type: 'string' },
       sha1:     { type: 'string' },
@@ -27,7 +29,8 @@ const RESOURCE_SCHEMAS = [
   },
   {
     name: 'ResourceLocation', collection: 'resource_locations', idPrefix: 'rl', timestamps: true,
-    read: [], write: [],
+    // 同 Resource：读不限制、写显式拒绝（位置行由 internal 存储流程维护）。
+    read: null, write: [],
     fields: {
       _id:        { type: 'string' },
       resourceId: { type: 'string' },
@@ -37,7 +40,8 @@ const RESOURCE_SCHEMAS = [
       priority:   { type: 'int' },
     },
     relations: {
-      resource: { model: 'Resource', type: 'one', localField: 'resourceId', foreignField: '_id', read: [] },
+      // 关系读不限制（未配置 = 走 unconfiguredPolicy），与主表读姿态一致。
+      resource: { model: 'Resource', type: 'one', localField: 'resourceId', foreignField: '_id', read: null },
     },
     indexes: [
       { keys: { resourceId: 1, backend: 1 }, options: { unique: true } },
@@ -45,7 +49,8 @@ const RESOURCE_SCHEMAS = [
   },
   {
     name: 'ResourceBinding', collection: 'resource_bindings', idPrefix: 'rb', timestamps: true,
-    read: [], write: [],
+    // 同 Resource：读不限制、写显式拒绝（绑定行由 internal 业务流程维护）。
+    read: null, write: [],
     fields: {
       _id:           { type: 'string' },
       resourceId:    { type: 'string' },
@@ -54,7 +59,8 @@ const RESOURCE_SCHEMAS = [
       userId:        { type: 'string' },
     },
     relations: {
-      resource: { model: 'Resource', type: 'one', localField: 'resourceId', foreignField: '_id', read: [] },
+      // 关系读不限制（未配置 = 走 unconfiguredPolicy），与主表读姿态一致。
+      resource: { model: 'Resource', type: 'one', localField: 'resourceId', foreignField: '_id', read: null },
     },
     indexes: [
       { keys: { resourceId: 1, businessTable: 1, businessId: 1 }, options: { unique: true } },

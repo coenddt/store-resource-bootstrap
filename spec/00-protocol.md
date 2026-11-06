@@ -168,7 +168,7 @@ from store_resource_bootstrap import capability, adapter
 [
   {
     "name": "Resource", "collection": "resources", "idPrefix": "", "timestamps": true,
-    "read": [], "write": [],
+    "read": null, "write": [],
     "fields": {
       "_id":      { "type": "string" },
       "sha1":     { "type": "string" },
@@ -184,7 +184,7 @@ from store_resource_bootstrap import capability, adapter
   },
   {
     "name": "ResourceLocation", "collection": "resource_locations", "idPrefix": "rl", "timestamps": true,
-    "read": [], "write": [],
+    "read": null, "write": [],
     "fields": {
       "_id":        { "type": "string" },
       "resourceId": { "type": "string" },
@@ -194,7 +194,7 @@ from store_resource_bootstrap import capability, adapter
       "priority":   { "type": "int" }
     },
     "relations": {
-      "resource": { "model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": [] }
+      "resource": { "model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": null }
     },
     "indexes": [
       { "keys": { "resourceId": 1, "backend": 1 }, "options": { "unique": true } }
@@ -202,7 +202,7 @@ from store_resource_bootstrap import capability, adapter
   },
   {
     "name": "ResourceBinding", "collection": "resource_bindings", "idPrefix": "rb", "timestamps": true,
-    "read": [], "write": [],
+    "read": null, "write": [],
     "fields": {
       "_id":           { "type": "string" },
       "resourceId":    { "type": "string" },
@@ -211,7 +211,7 @@ from store_resource_bootstrap import capability, adapter
       "userId":        { "type": "string" }
     },
     "relations": {
-      "resource": { "model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": [] }
+      "resource": { "model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": null }
     },
     "indexes": [
       { "keys": { "resourceId": 1, "businessTable": 1, "businessId": 1 }, "options": { "unique": true } }
@@ -219,3 +219,10 @@ from store_resource_bootstrap import capability, adapter
   }
 ]
 ```
+
+**`read` / `write` 语义（以宿主 core `evaluate` 判决为准，node / py 一致）**：
+
+- `read: null`（未配置）= **不限制读**，走 `unconfiguredPolicy`（缺省 `open`）；
+- `read: []` = **显式拒读**（仅 `internal` 与 `exemptRoles` 可读）；关系级 `relations.*.read` 同理；
+- `write: []` = **显式拒写**（资源行只由 internal 上传 / 绑定流程写入）。
+- 参考三表统一为「读不限制、写显式拒绝」，保持旧版默认可读的既有行为；需要收紧读范围的部署由接入方自行填角色清单。

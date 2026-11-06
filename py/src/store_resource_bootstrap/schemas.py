@@ -12,7 +12,9 @@ from __future__ import annotations
 RESOURCE_SCHEMAS: list[dict] = [
     {
         "name": "Resource", "collection": "resources", "idPrefix": "", "timestamps": True,
-        "read": [], "write": [],
+        # read 未配置（None）= 不限制，走宿主 unconfigured_policy 缺省 open；
+        # write: [] 为显式拒写（资源行只由 internal 上传流程写入），语义见 spec 附录 A。
+        "read": None, "write": [],
         "fields": {
             "_id":      {"type": "string"},
             "sha1":     {"type": "string"},
@@ -28,7 +30,8 @@ RESOURCE_SCHEMAS: list[dict] = [
     },
     {
         "name": "ResourceLocation", "collection": "resource_locations", "idPrefix": "rl", "timestamps": True,
-        "read": [], "write": [],
+        # 同 Resource：读不限制、写显式拒绝（位置行由 internal 存储流程维护）。
+        "read": None, "write": [],
         "fields": {
             "_id":        {"type": "string"},
             "resourceId": {"type": "string"},
@@ -38,7 +41,8 @@ RESOURCE_SCHEMAS: list[dict] = [
             "priority":   {"type": "int"},
         },
         "relations": {
-            "resource": {"model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": []},
+            # 关系读不限制（未配置 = 走 unconfigured_policy），与主表读姿态一致。
+            "resource": {"model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": None},
         },
         "indexes": [
             {"keys": {"resourceId": 1, "backend": 1}, "options": {"unique": True}},
@@ -46,7 +50,8 @@ RESOURCE_SCHEMAS: list[dict] = [
     },
     {
         "name": "ResourceBinding", "collection": "resource_bindings", "idPrefix": "rb", "timestamps": True,
-        "read": [], "write": [],
+        # 同 Resource：读不限制、写显式拒绝（绑定行由 internal 业务流程维护）。
+        "read": None, "write": [],
         "fields": {
             "_id":           {"type": "string"},
             "resourceId":    {"type": "string"},
@@ -55,7 +60,8 @@ RESOURCE_SCHEMAS: list[dict] = [
             "userId":        {"type": "string"},
         },
         "relations": {
-            "resource": {"model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": []},
+            # 关系读不限制（未配置 = 走 unconfigured_policy），与主表读姿态一致。
+            "resource": {"model": "Resource", "type": "one", "localField": "resourceId", "foreignField": "_id", "read": None},
         },
         "indexes": [
             {"keys": {"resourceId": 1, "businessTable": 1, "businessId": 1}, "options": {"unique": True}},
