@@ -13,6 +13,7 @@ from .schemas import RESOURCE_SCHEMAS
 from . import providers as providers
 
 CAPABILITY_FACADES = ("register", "has", "configure_resource")
+CREATE_FACADES = ("has", "configure_resource")
 ALLOWED_OPTS = ("providers", "schemas", "url", "sign", "schema", "fields", "providerPlugins")
 DEFAULT_SCHEMA_NAMES = {
     "resource": "Resource",
@@ -82,6 +83,30 @@ def schemas():
     return copy.deepcopy(RESOURCE_SCHEMAS)
 
 
+def _register_all(store, defns):
+    """优先单次 register_batch（宿主批量本身原子）；旧宿主回落逐条 register，由调用方补偿。"""
+    batch = getattr(store, "register_batch", None)
+    if callable(batch):
+        batch([{"defn": defn, "location": None} for defn in defns])
+        return
+    for defn in defns:
+        store.register(defn)
+
+
+def _rollback_registered(store, names):
+    """整份清单重放 unregister（未知 schema 幂等成功）；返回补偿后仍残留的名字。"""
+    fn = getattr(store, "unregister", None)
+    if not callable(fn):
+        return list(names)
+    residual = []
+    for name in names:
+        try:
+            fn(name)
+        except Exception:  # noqa: BLE001 — 补偿失败必须如实返回残留，不吞成成功
+            residual.append(name)
+    return residual
+
+
 class _Handle:
     def __init__(self, store, opts):
         self._store = store
@@ -105,22 +130,29 @@ class _Handle:
         # （失败保留旧池）。放在 schema 注册之前 ⇒ 失败时不会留下新注册的空表（零 schema 副作用）；
         # provider 注册是它的前置且幂等，无法后置。
         await _call(self._store.configure_resource, payload)
-        registered = []
+        pending = []
         skipped = []
         for defn in self._opts["schemas"]:
             if self._store.has(defn["name"]):      # has 为同步门面
                 skipped.append(defn["name"])
             else:
-                try:
-                    self._store.register(defn)         # register 为同步门面，幂等
-                except Exception as e:
-                    # 宿主无 unregister：schema 注册非原子，失败时前面已注册的表会保留。
-                    # 错误里带已注册清单，调用方据此清理或重建，避免静默留下半配置。
-                    raise ValueError(
-                        f"schema 注册失败: {defn['name']}（已注册: [{', '.join(registered)}]）: {e}"
-                    ) from e
-                registered.append(defn["name"])
-        return {"registered": registered, "skipped": skipped, "providerRegistered": provider_registered}
+                pending.append(defn)
+        attempted = [defn["name"] for defn in pending]
+        if pending:
+            try:
+                _register_all(self._store, pending)   # 批量原子；旧宿主逐条（需补偿）
+            except Exception as e:
+                # 注册失败后按整份清单补偿（unregister 对未知 schema 幂等），不静默留下半配置。
+                residual = _rollback_registered(self._store, attempted)
+                err = ValueError(
+                    f"schema 注册失败: [{', '.join(attempted)}]"
+                    f"（残留: [{', '.join(residual)}]）: {e}"
+                )
+                err.code = "SCHEMA_REGISTER_FAILED"
+                err.registered = residual
+                err.attempted = list(attempted)
+                raise err from e
+        return {"registered": attempted, "skipped": skipped, "providerRegistered": provider_registered}
 
     async def reload(self):
         # 宿主 configure 整体替换 _pool，故 reload ≡ start（无需先清除）
@@ -128,7 +160,7 @@ class _Handle:
 
 
 def create(store, opts=None):
-    _assert_store(store, CAPABILITY_FACADES, "capability.create")
+    _assert_store(store, CREATE_FACADES, "capability.create")
     opts = {} if opts is None else opts
     if not isinstance(opts, dict):
         raise ValueError("capability.create: opts 须为 dict")
@@ -190,6 +222,12 @@ def create(store, opts=None):
         effective_schemas = copy.deepcopy(schemas_opt)
     else:
         raise ValueError("capability.create: schemas 须为数组、null 或 false")
+    # 条件化门面校验：仅当有 schema 需要注册时才要求宿主门面（向后兼容旧 store）
+    if len(effective_schemas) > 0:
+        if not callable(getattr(store, "register", None)) and not callable(
+            getattr(store, "register_batch", None)
+        ):
+            raise ValueError("capability.create: store 缺少门面方法: register 或 register_batch")
     # 条件化门面校验：仅当有 provider 需要注册时才要求宿主门面（向后兼容旧 store）
     if len(provider_plugins) > 0:
         _assert_store(store, ("register_provider",), "capability.create")

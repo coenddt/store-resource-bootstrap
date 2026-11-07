@@ -6,6 +6,7 @@ const providers = require('./providers');
 
 /* ---- 常量 ---- */
 const CAPABILITY_FACADES = ['register', 'has', 'configureResource'];
+const CREATE_FACADES = ['has', 'configureResource'];
 const ALLOWED_OPTS = ['providers', 'schemas', 'url', 'sign', 'schema', 'fields', 'providerPlugins'];
 const DEFAULT_SCHEMA_NAMES = {
   resource: 'Resource',
@@ -79,8 +80,34 @@ function schemas() {
   return RESOURCE_SCHEMAS.map((defn) => JSON.parse(JSON.stringify(defn)));
 }
 
+/**
+ * 注册门面：优先单次 `registerBatch`（宿主批量本身原子，失败零副作用）；
+ * 旧宿主无批量门面时回落逐条 `register`，由调用方用 `unregister` 补偿。
+ */
+function registerAll(store, defns) {
+  if (typeof store.registerBatch === 'function') {
+    store.registerBatch(defns.map((defn) => ({ defn, location: null })));
+    return;
+  }
+  for (const defn of defns) store.register(defn);
+}
+
+/** 回滚补偿：整份清单重放 `unregister`（未知 schema 幂等成功）；返回补偿后仍残留的名字 */
+function rollbackRegistered(store, names) {
+  if (typeof store.unregister !== 'function') return names.slice();
+  const residual = [];
+  for (const name of names) {
+    try {
+      store.unregister(name);
+    } catch (e) {
+      residual.push(name);
+    }
+  }
+  return residual;
+}
+
 function create(store, opts = {}) {
-  assertStore(store, CAPABILITY_FACADES, 'capability.create');
+  assertStore(store, CREATE_FACADES, 'capability.create');
   assertKnownKeys(opts, 'capability.create');
 
   const providers = opts.providers;
@@ -154,6 +181,12 @@ function create(store, opts = {}) {
   } else {
     throw new Error('capability.create: schemas 须为数组、null 或 false');
   }
+  // 条件化门面校验：仅当有 schema 需要注册时才要求宿主门面（向后兼容旧 store）
+  if (effectiveSchemas.length > 0
+      && typeof store.register !== 'function'
+      && typeof store.registerBatch !== 'function') {
+    throw new Error('capability.create: store 缺少门面方法: register 或 registerBatch');
+  }
   // 条件化门面校验：仅当有 provider 需要注册时才要求宿主门面（向后兼容旧 store）
   if (providerPlugins.length > 0) {
     assertStore(store, ['registerProvider'], 'capability.create');
@@ -171,29 +204,30 @@ function create(store, opts = {}) {
     // （失败保留旧池）。放在 schema 注册之前 ⇒ 失败时不会留下新注册的空表（零 schema 副作用）；
     // provider 注册是它的前置且幂等，无法后置。
     await store.configureResource(cfg);
-    const registered = [];
+    const pending = [];
     const skipped = [];
     for (const defn of effectiveSchemas) {
-      if (store.has(defn.name)) {
-        skipped.push(defn.name);   // has 为同步门面
-      } else {
-        try {
-          store.register(defn);    // register 为同步门面，幂等
-        } catch (e) {
-          // 宿主无 unregister：schema 注册非原子，失败时前面已注册的表会保留。
-          // 错误里带已注册清单，调用方据此清理或重建，避免静默留下半配置。
-          const err = new Error(
-            `schema 注册失败: ${defn.name}（已注册: [${registered.join(', ')}]）: ${e.message}`,
-          );
-          err.code = 'SCHEMA_REGISTER_FAILED';
-          err.registered = registered.slice();
-          err.cause = e;
-          throw err;
-        }
-        registered.push(defn.name);
+      if (store.has(defn.name)) skipped.push(defn.name);   // has 为同步门面
+      else pending.push(defn);
+    }
+    const attempted = pending.map((defn) => defn.name);
+    if (pending.length) {
+      try {
+        registerAll(store, pending);      // 批量原子；旧宿主逐条（需补偿）
+      } catch (e) {
+        // 注册失败后按整份清单补偿（unregister 对未知 schema 幂等），不静默留下半配置。
+        const residual = rollbackRegistered(store, attempted);
+        const err = new Error(
+          `schema 注册失败: [${attempted.join(', ')}]（残留: [${residual.join(', ')}]）: ${e.message}`,
+        );
+        err.code = 'SCHEMA_REGISTER_FAILED';
+        err.registered = residual;
+        err.attempted = attempted.slice();
+        err.cause = e;
+        throw err;
       }
     }
-    return { registered, skipped, providerRegistered };
+    return { registered: attempted, skipped, providerRegistered };
   }
 
   return {

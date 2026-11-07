@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Changed（schema 注册接入批量原子 + `unregister` 补偿；错误信息变化）
+
+- **`start()` 注册阶段改为「优先单次 `registerBatch`」**：宿主批量本身原子（构造期先校验，任一错误零副作用）。
+  旧宿主无批量门面时回落逐条 `register`，失败后按整份清单重放 `unregister` 补偿（未知 schema 幂等成功），
+  不再默认留下半配置。注册仍在 `configureResource` 之后，顺序不变。
+- **错误信息与字段语义变化**：`SCHEMA_REGISTER_FAILED` 的 `registered` 从「失败前已注册」改为「补偿后仍残留」，
+  新增 `attempted`（本次尝试清单）；message 由 `schema 注册失败: X（已注册: [...]）` 改为
+  `schema 注册失败: [A, B]（残留: [...]）`。依赖旧文案或旧字段语义的下游需适配。
+- **构造期门面放宽**：`register` 与 `registerBatch` 二者有其一即可创建（旧宿主不受影响）。
+
+### Added（注册失败取证与补偿用例）
+
+- node：C21（旧宿主逐条残留取证）、C22（批量顺序/清单）、C23（批量失败零残留 + 幂等重放）、
+  C24（补偿失败如实报残留）、C25（仅 `registerBatch` 可创建）；py 同名用例逐项对应。
+- 取证输出（一次性脚本，已删除）：旧逐条实现残留 `["PartialA"]` 且 `unregister` 调用 0 次；
+  新实现残留 `[]` 且整份清单被补偿。
+
 ### Breaking（start() 固定序列：先 configureResource，再注册 schema）
 
 - **`start()` 门面顺序调整**为：注册 `providerPlugins` → `await configureResource({...})` → 幂等注册 `schemas`。
