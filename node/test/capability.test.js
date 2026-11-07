@@ -234,3 +234,25 @@ test('C19 configureResource 失败 ⇒ schema 零注册（start 失败无半配�
   await assert.rejects(() => handle.start(), /provider kind 未知/);
   assert.deepEqual(store.calls.map((c) => c[0]), ['configureResource'], '失败后不得留下任何 register');
 });
+
+test('C21 schema 注册中途失败：错误带已注册清单（非原子取证）', async () => {
+  const store = mockStore();
+  const defs = [
+    { name: 'PartialA', collection: 'partial_a', read: null, write: [], fields: { _id: { type: 'string' } }, relations: {}, indexes: [] },
+    { name: 'PartialB', collection: 'partial_b', read: null, write: [], fields: { _id: { type: 'string' } }, relations: {}, indexes: [] },
+  ];
+  const handle = capability.create(store, { providers: [{ kind: 'local' }], schemas: defs });
+  const original = store.register.bind(store);
+  let calls = 0;
+  store.register = (defn) => {
+    calls += 1;
+    if (calls === 2) throw new Error('注入失败');
+    return original(defn);
+  };
+  await assert.rejects(() => handle.start(), (e) => {
+    assert.equal(e.code, 'SCHEMA_REGISTER_FAILED');
+    assert.deepEqual(e.registered, ['PartialA']);
+    assert.match(e.message, /已注册: \[PartialA\]/);
+    return true;
+  });
+});

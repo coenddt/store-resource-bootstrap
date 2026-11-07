@@ -271,3 +271,27 @@ def test_reference_schema_read_is_unconfigured():
         assert defs[name]["write"] == []
     assert defs["ResourceLocation"]["relations"]["resource"]["read"] is None
     assert defs["ResourceBinding"]["relations"]["resource"]["read"] is None
+
+
+def test_schema_register_partial_failure_reports_registered():
+    """宿主无 unregister：注册非原子，失败时必须回传已注册清单（不静默留半配置）。"""
+    store = _store()
+    defs = [
+        {"name": "PartialA", "collection": "partial_a", "read": None, "write": [],
+         "fields": {"_id": {"type": "string"}}, "relations": {}, "indexes": []},
+        {"name": "PartialB", "collection": "partial_b", "read": None, "write": [],
+         "fields": {"_id": {"type": "string"}}, "relations": {}, "indexes": []},
+    ]
+    handle = capability.create(store, _ok_opts(schemas=defs))
+    original = store.register
+    state = {"n": 0}
+
+    def register(defn):
+        state["n"] += 1
+        if state["n"] == 2:
+            raise RuntimeError("注入失败")
+        original(defn)
+
+    store.register = register
+    with pytest.raises(ValueError, match=r"已注册: \[PartialA\]"):
+        run(handle.start())
