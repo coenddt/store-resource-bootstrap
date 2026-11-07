@@ -177,7 +177,19 @@ function create(store, opts = {}) {
       if (store.has(defn.name)) {
         skipped.push(defn.name);   // has 为同步门面
       } else {
-        store.register(defn);      // register 为同步门面，幂等
+        try {
+          store.register(defn);    // register 为同步门面，幂等
+        } catch (e) {
+          // 宿主无 unregister：schema 注册非原子，失败时前面已注册的表会保留。
+          // 错误里带已注册清单，调用方据此清理或重建，避免静默留下半配置。
+          const err = new Error(
+            `schema 注册失败: ${defn.name}（已注册: [${registered.join(', ')}]）: ${e.message}`,
+          );
+          err.code = 'SCHEMA_REGISTER_FAILED';
+          err.registered = registered.slice();
+          err.cause = e;
+          throw err;
+        }
         registered.push(defn.name);
       }
     }

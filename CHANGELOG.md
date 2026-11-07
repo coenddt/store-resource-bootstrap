@@ -19,6 +19,15 @@
 - `write: []` **保留** —— 本意就是显式拒写（资源行只由 internal 上传 / 绑定流程写入），与读姿态不对称属设计内。
 - `spec/00-protocol.md` 附录 A、`conformance/cases.json`（canonical 与 `custom_schemas` 用例）同步。
 
+### Added（schema 注册失败可恢复信息）
+
+- **`start()` 的 schema 注册循环加失败包装（node / py 两端）**：宿主无 `unregister`，注册非原子，
+  中途失败时前面已注册的表会留在宿主里。现在抛出的错误带 `code = 'SCHEMA_REGISTER_FAILED'`（node）
+  与「已注册: [...]」清单（两端消息一致），调用方可据清单清理或重建，不再只看到一句原始错误。
+  py 端以 `ValueError` 包装并 `raise ... from e` 保留原始 cause。
+- 新增用例：node `capability.test.js` C21（部分失败清单）、`native-read.test.js` 真实 core 零副作用；
+  py `test_schema_register_partial_failure_reports_registered`。
+
 ### Added
 
 - `node/test/capability.test.js` C19：`configureResource` 抛错时，宿主只收到 `configureResource` 一次调用，

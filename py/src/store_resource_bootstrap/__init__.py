@@ -111,7 +111,14 @@ class _Handle:
             if self._store.has(defn["name"]):      # has 为同步门面
                 skipped.append(defn["name"])
             else:
-                self._store.register(defn)         # register 为同步门面，幂等
+                try:
+                    self._store.register(defn)         # register 为同步门面，幂等
+                except Exception as e:
+                    # 宿主无 unregister：schema 注册非原子，失败时前面已注册的表会保留。
+                    # 错误里带已注册清单，调用方据此清理或重建，避免静默留下半配置。
+                    raise ValueError(
+                        f"schema 注册失败: {defn['name']}（已注册: [{', '.join(registered)}]）: {e}"
+                    ) from e
                 registered.append(defn["name"])
         return {"registered": registered, "skipped": skipped, "providerRegistered": provider_registered}
 
