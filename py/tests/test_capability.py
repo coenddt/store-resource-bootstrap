@@ -56,7 +56,7 @@ def test_C3_schemas_deep_copy():
 
 
 def test_C4_store_missing_facade():
-    with pytest.raises(ValueError, match="register"):
+    with pytest.raises(ValueError, match="门面方法"):
         capability.create({}, _ok_opts())
 
 
@@ -274,7 +274,7 @@ def test_reference_schema_read_is_unconfigured():
 
 
 def test_schema_register_partial_failure_reports_registered():
-    """宿主无 unregister：注册非原子，失败时必须回传已注册清单（不静默留半配置）。"""
+    """旧宿主（无 register_batch/unregister）：注册非原子，失败时整份清单如实报残留。"""
     store = _store()
     defs = [
         {"name": "PartialA", "collection": "partial_a", "read": None, "write": [],
@@ -293,5 +293,61 @@ def test_schema_register_partial_failure_reports_registered():
         original(defn)
 
     store.register = register
-    with pytest.raises(ValueError, match=r"已注册: \[PartialA\]"):
+    with pytest.raises(ValueError, match=r"残留: \[PartialA, PartialB\]"):
         run(handle.start())
+    assert store.has("PartialA") and not store.has("PartialB")
+
+
+PARTIAL_DEFS = [
+    {"name": "PartialA", "collection": "partial_a", "read": None, "write": [],
+     "fields": {"_id": {"type": "string"}}, "relations": {}, "indexes": []},
+    {"name": "PartialB", "collection": "partial_b", "read": None, "write": [],
+     "fields": {"_id": {"type": "string"}}, "relations": {}, "indexes": []},
+]
+
+
+def test_schema_register_batch_atomic_and_order():
+    """新宿主：单次 register_batch 原子注册，位于 configure_resource 之后。"""
+    store = MockStore(batch=True, unregister=True)
+    handle = capability.create(store, _ok_opts(schemas=PARTIAL_DEFS))
+    result = run(handle.start())
+    assert result["registered"] == ["PartialA", "PartialB"]
+    names = [c[0] for c in store.calls]
+    assert names.index("configure_resource") < names.index("register_batch")
+    assert store.has("PartialA") and store.has("PartialB")
+
+
+def test_schema_register_batch_failure_rolls_back_and_replays():
+    """批量失败：整份清单补偿后零残留，同一 store 可直接幂等重放成功。"""
+    store = MockStore(batch=True, unregister=True, fail_batch=True)
+    handle = capability.create(store, _ok_opts(schemas=PARTIAL_DEFS))
+    with pytest.raises(ValueError) as ei:
+        run(handle.start())
+    err = ei.value
+    assert err.code == "SCHEMA_REGISTER_FAILED"
+    assert err.attempted == ["PartialA", "PartialB"]
+    assert err.registered == []
+    assert "残留: []" in str(err)
+    assert [c[1] for c in store.calls if c[0] == "unregister"] == ["PartialA", "PartialB"]
+    assert not store.has("PartialA") and not store.has("PartialB")
+
+    store.unregister("PartialA")                      # 未知 schema 幂等成功
+    result = run(handle.start())
+    assert result["registered"] == ["PartialA", "PartialB"]
+    assert store.has("PartialA") and store.has("PartialB")
+
+
+def test_schema_register_rollback_failure_reports_residual():
+    """补偿失败不伪装成功：残留清单如实返回。"""
+    store = MockStore(batch=True, unregister=True, fail_batch=True, fail_unregister=True)
+    handle = capability.create(store, _ok_opts(schemas=PARTIAL_DEFS))
+    with pytest.raises(ValueError, match=r"残留: \[PartialA, PartialB\]") as ei:
+        run(handle.start())
+    assert ei.value.registered == ["PartialA", "PartialB"]
+
+
+def test_create_accepts_batch_only_store():
+    """构造期放宽：宿主只提供 register_batch 也可创建。"""
+    store = MockStore(batch=True)
+    store.register = None
+    assert capability.create(store, _ok_opts(schemas=PARTIAL_DEFS)) is not None

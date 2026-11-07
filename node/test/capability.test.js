@@ -33,7 +33,7 @@ test('C3 schemas() 深拷贝', () => {
 });
 
 test('C4 store 缺门面', () => {
-  assert.throws(() => capability.create({}, OK_OPTS), /register/);
+  assert.throws(() => capability.create({}, OK_OPTS), /门面方法/);
 });
 
 test('C5 providers 缺失/空', () => {
@@ -235,7 +235,7 @@ test('C19 configureResource 失败 ⇒ schema 零注册（start 失败无半配�
   assert.deepEqual(store.calls.map((c) => c[0]), ['configureResource'], '失败后不得留下任何 register');
 });
 
-test('C21 schema 注册中途失败：错误带已注册清单（非原子取证）', async () => {
+test('C21 旧宿主（无 registerBatch/unregister）：中途失败整份残留（改前失败取证）', async () => {
   const store = mockStore();
   const defs = [
     { name: 'PartialA', collection: 'partial_a', read: null, write: [], fields: { _id: { type: 'string' } }, relations: {}, indexes: [] },
@@ -251,8 +251,69 @@ test('C21 schema 注册中途失败：错误带已注册清单（非原子取证
   };
   await assert.rejects(() => handle.start(), (e) => {
     assert.equal(e.code, 'SCHEMA_REGISTER_FAILED');
-    assert.deepEqual(e.registered, ['PartialA']);
-    assert.match(e.message, /已注册: \[PartialA\]/);
+    // 旧宿主没有 unregister：第二张失败，第一张已注册且无法回滚 ⇒ 整份清单如实报为残留
+    assert.deepEqual(e.attempted, ['PartialA', 'PartialB']);
+    assert.deepEqual(e.registered, ['PartialA', 'PartialB']);
+    assert.match(e.message, /残留: \[PartialA, PartialB\]/);
     return true;
   });
+  assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [true, false]);
+});
+
+const PARTIAL_DEFS = [
+  { name: 'PartialA', collection: 'partial_a', read: null, write: [], fields: { _id: { type: 'string' } }, relations: {}, indexes: [] },
+  { name: 'PartialB', collection: 'partial_b', read: null, write: [], fields: { _id: { type: 'string' } }, relations: {}, indexes: [] },
+];
+
+test('C22 新宿主：单次 registerBatch 原子注册，顺序在 configureResource 之后', async () => {
+  const store = mockStore({}, { batch: true, unregister: true });
+  const handle = capability.create(store, { providers: [{ kind: 'local' }], schemas: PARTIAL_DEFS });
+  const result = await handle.start();
+  assert.deepEqual(result.registered, ['PartialA', 'PartialB']);
+  assert.deepEqual(result.skipped, []);
+  const batchAt = store.calls.findIndex((c) => c[0] === 'registerBatch');
+  const cfgAt = store.calls.findIndex((c) => c[0] === 'configureResource');
+  assert.ok(cfgAt >= 0 && batchAt > cfgAt, '批量注册必须在 configureResource 之后');
+  assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [true, true]);
+});
+
+test('C23 批量失败：整份清单补偿后零残留，同一 store 可直接重放成功', async () => {
+  const store = mockStore({}, { batch: true, unregister: true, failBatch: true });
+  const handle = capability.create(store, { providers: [{ kind: 'local' }], schemas: PARTIAL_DEFS });
+  await assert.rejects(() => handle.start(), (e) => {
+    assert.equal(e.code, 'SCHEMA_REGISTER_FAILED');
+    assert.deepEqual(e.attempted, ['PartialA', 'PartialB']);
+    assert.deepEqual(e.registered, [], '补偿成功时残留必须为空');
+    assert.match(e.message, /残留: \[\]/);
+    return true;
+  });
+  assert.deepEqual(
+    store.calls.filter((c) => c[0] === 'unregister').map((c) => c[1]),
+    ['PartialA', 'PartialB'],
+  );
+  assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [false, false]);
+
+  assert.doesNotThrow(() => store.unregister('PartialA'));
+  const result = await handle.start();
+  assert.deepEqual(result.registered, ['PartialA', 'PartialB']);
+  assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [true, true]);
+});
+
+test('C24 补偿失败：不伪装成功，残留清单如实返回', async () => {
+  const store = mockStore({}, { batch: true, unregister: true, failBatch: true, failUnregister: true });
+  const handle = capability.create(store, { providers: [{ kind: 'local' }], schemas: PARTIAL_DEFS });
+  await assert.rejects(() => handle.start(), (e) => {
+    assert.deepEqual(e.registered, ['PartialA', 'PartialB']);
+    assert.match(e.message, /残留: \[PartialA, PartialB\]/);
+    return true;
+  });
+});
+
+test('C25 构造期：宿主只提供 registerBatch 也可创建（门面放宽）', () => {
+  const store = mockStore({}, { batch: true });
+  delete store.register;
+  assert.doesNotThrow(() => capability.create(store, {
+    providers: [{ kind: 'local' }],
+    schemas: PARTIAL_DEFS,
+  }));
 });
