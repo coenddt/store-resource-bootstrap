@@ -1,16 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.3.5 (2026-11-08)
 
-### Changed（非破坏：schema 注册接入批量原子 + `unregister` 补偿，目标 0.3.5）
+目标版本 **0.3.5**（全部非破坏）。
 
-- **`start()` 注册阶段改为「优先单次 `registerBatch`」**：宿主批量本身原子（构造期先校验，任一错误零副作用）。
-  旧宿主无批量门面时回落逐条 `register`，失败后按整份清单重放 `unregister` 补偿（未知 schema 幂等成功），
-  不再默认留下半配置。注册仍在 `configureResource` 之后，顺序不变。
-- **注册失败的错误契约保持原样**：补偿成功时**直接透传宿主原错误**（错误码与 message 均不改写）；
-  只有补偿后仍有残留时，才在原错误对象上附加 `attempted`（本次尝试清单）与 `registered`（残留清单），
-  主错误码与文案不动。下游无需任何适配，故本批按补丁版本（0.3.5）归类。
-- **构造期门面放宽**：`register` 与 `registerBatch` 二者有其一即可创建（旧宿主不受影响）。
+### Breaking
+
+- 无（本版全部为非破坏改动）：`start()` 成功路径的返回结构 `{ registered, skipped, providerRegistered }` 与门面调用顺序未变，
+  错误码与文案未新增或改写，宿主原有异常对象原样透传，因此本版按补丁版本（0.3.5）归类。
+
+### Changed（schema 注册接入批量原子 + `unregister` 补偿，目标 0.3.5）
+
+- **`start()` 注册阶段改为「优先单次 `registerBatch`」**：宿主批量本身原子（构造期先校验，任一失败零副作用）；
+  宿主无批量门面时自动回落逐条 `register`，不需要配置开关，也不因门面缺失而报错。注册仍在 `configureResource` 之后，顺序不变。
+- **`configureResource` 前置，保证失败零注册**：`start()` 顺序固定为 `registerProvider`（仅当配置了 `providerPlugins`）→
+  `configureResource` → schema 注册。`configureResource` 是唯一可能因宿主语义校验失败的一步（宿主整体替换 `_pool`，失败保留旧池），
+  前置后它失败时 schema 零注册，不留「已注册但未配置」的空表。
+- **注册失败按整份清单补偿**：失败后对本次 attempted 的整份清单逐名调用 `unregister`（未知 schema 幂等成功），
+  不静默留下半配置；宿主无 `unregister` 时无法补偿，如实把残留写进错误。
+- **注册失败的错误契约**：补偿干净时**直接透传宿主原错误对象**（对象同一性、`code`、`message` 均不变）；
+  仅当补偿后确实仍有残留时，才在原错误对象上附加 `attempted`（本次尝试清单）与 `registered`（残留清单），
+  主错误码与文案不动。上一轮的 `SCHEMA_REGISTER_FAILED` 包装已撤销，不再出现该错误码。
+- **构造期门面放宽**：schema 注册只需 `register` 与 `registerBatch` 二者有其一即可创建；`registerProvider` 仍按
+  `providerPlugins` 是否存在做条件校验（旧宿主不受影响）。
 
 ### Added（注册失败取证与补偿用例）
 
@@ -18,14 +30,6 @@
   C23（批量失败零残留 + 原错误对象原样透传 + 幂等重放）、C24（补偿失败如实附加残留）、C25（仅 `registerBatch` 可创建）；py 同名用例逐项对应。
 - 取证输出（一次性脚本，已删除）：旧逐条实现残留 `["PartialA"]` 且 `unregister` 调用 0 次；
   新实现残留 `[]` 且整份清单被补偿。
-
-### Breaking（start() 固定序列：先 configureResource，再注册 schema）
-
-- **`start()` 门面顺序调整**为：注册 `providerPlugins` → `await configureResource({...})` → 幂等注册 `schemas`。
-  - `registerProvider` 是 `configureResource` 的前置且幂等，无法后置；
-  - `configureResource` 是唯一可能因宿主语义校验失败的一步（宿主整体替换 `_pool`，失败保留旧池）；
-    把它放在 schema 注册**之前** ⇒ 失败时不留「已注册但未配置」的空表。
-- node / py 两端逐位一致；`spec/00-protocol.md`、`conformance/cases.json`、`README.md` / `README.en.md` 同步。
 
 ### Fixed（参考 schema `read: []` → `read: null`，对齐宿主新语义）
 
@@ -35,15 +39,6 @@
   对普通角色不可读 ⇒ 全部改为 `read: null`，保持旧版既有行为。
 - `write: []` **保留** —— 本意就是显式拒写（资源行只由 internal 上传 / 绑定流程写入），与读姿态不对称属设计内。
 - `spec/00-protocol.md` 附录 A、`conformance/cases.json`（canonical 与 `custom_schemas` 用例）同步。
-
-### Added（schema 注册失败可恢复信息）
-
-- **`start()` 的 schema 注册循环加失败包装（node / py 两端）**：宿主无 `unregister`，注册非原子，
-  中途失败时前面已注册的表会留在宿主里。现在抛出的错误带 `code = 'SCHEMA_REGISTER_FAILED'`（node）
-  与「已注册: [...]」清单（两端消息一致），调用方可据清单清理或重建，不再只看到一句原始错误。
-  py 端以 `ValueError` 包装并 `raise ... from e` 保留原始 cause。
-- 新增用例：node `capability.test.js` C21（部分失败清单）、`native-read.test.js` 真实 core 零副作用；
-  py `test_schema_register_partial_failure_reports_registered`。
 
 ### Added
 

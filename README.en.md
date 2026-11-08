@@ -13,10 +13,12 @@
 
 > 中文: [README.md](./README.md)
 
-| Runtime | Package | Version | Import | Host compatibility | Engine floor |
+| Runtime | Package | Target version | Import | Host compatibility | Engine floor |
 |---|---|---|---|---|---|
-| Node | `store-resource-bootstrap-node` | **0.3.4** | `require('store-resource-bootstrap-node')` | `nodejs-store >= 4.3.0`, optional peer | Node >= 18 |
-| Python | `store-resource-bootstrap-py` | **0.3.4** | `from store_resource_bootstrap import capability, adapter` | `py-store >= 4.3.0` compatibility floor | Python >= 3.10 |
+| Node | `store-resource-bootstrap-node` | **0.3.5** | `require('store-resource-bootstrap-node')` | `nodejs-store >= 4.3.0`, optional peer | Node >= 18 |
+| Python | `store-resource-bootstrap-py` | **0.3.5** | `from store_resource_bootstrap import capability, adapter` | `py-store >= 4.3.0` compatibility floor | Python >= 3.10 |
+
+> Versions in the table are **target versions**, shipping in this batch; until then the registry still serves the old line — install from this repo's source.
 
 ## Three services, three ways to sign a file URL
 
@@ -32,7 +34,7 @@ The bytes were never the problem. They live where they live. What is missing is 
 
 The plugin does two things, in the order their names imply:
 
-1. **Capability bootstrap** — install the `providerPlugins` factories into the host synchronously, call the host's existing resource façade `configureResource({ providers, url, sign, schema, fields })`, then idempotently `register` the schema definitions *you inject*.
+1. **Capability bootstrap** — install the `providerPlugins` factories into the host synchronously, call the host's existing resource façade `configureResource({ providers, url, sign, schema, fields })`, then idempotently register the schema definitions *you inject* (single `registerBatch` when available, with `unregister` compensation over the whole attempted list on failure; `configureResource` is the only step that can fail host-side validation, and it runs before schema registration, so a failure registers zero schemas).
 2. **Seam adaptation** — produce the `download` / `upload` / `uploadResolver` functions that a skin needs, shaped exactly like store-api's existing file sub-route expects.
 
 It ships **no authoritative resource schema**, creates **no tables**, and exposes **no HTTP route**. Those belong to the business, the host, and the skin respectively.
@@ -68,6 +70,159 @@ One detail matters: `Resource.idPrefix` must be the empty string. The host gener
 
 `opts.fields` renames what the generic code touches. It maps each table's **logical role** to a **physical column** — for example `sha1 → contentHash`, `key → objectKey`, `businessTable → entity`. Required roles must be non-empty strings; optional roles may be a non-empty string or `null`, where `null` means "do not persist this column". `_id` is not mappable. The key is forwarded only when provided, so older hosts keep byte-for-byte compatible payloads.
 
+### Atomic registration and rollback
+
+`start()` always runs in this order: `registerProvider` (only when `providerPlugins` is configured) → `configureResource` → schema registration.
+
+- **`configureResource` first means a failure registers nothing**: it is the only step that can fail host-side semantic validation (the host swaps `_pool` wholesale and keeps the old pool on failure). Running it before schema registration means a failure leaves no newly registered tables behind.
+- **Batch first**: schema registration uses the host's optional `registerBatch` façade in a single call (validated on construction, so any failure has zero side effects). When the host lacks it, the plugin falls back to per-definition `register` automatically — no config switch, no error.
+- **Compensate over the whole attempted list**: if registration fails midway, every attempted name is passed to `unregister` (unknown schemas succeed idempotently). A host without `unregister` cannot compensate; the residue is then reported honestly in the error instead of being masked as success.
+- **Error contract**: when compensation is clean, the **host's original error object is rethrown untouched** — object identity, `code`, and `message` all unchanged. Only when residue truly remains does the plugin attach `attempted` (what it tried) and `registered` (what is still there) to that same object, leaving the primary code and message alone. The success-path result `{ registered, skipped, providerRegistered }` and the façade call order are unchanged.
+
+The snippet below runs as-is (`node` plus this package, with a minimal host stand-in):
+
+```javascript
+const { capability } = require('store-resource-bootstrap-node');
+
+// Minimal host stand-in: registerBatch / unregister are optional façades, both provided here.
+function makeStore() {
+  const registered = new Set();
+  return {
+    registered,
+    has: (name) => registered.has(name),
+    configureResource: async () => {},
+    registerBatch: (items) => items.forEach(({ defn }) => registered.add(defn.name)),
+    unregister: (name) => registered.delete(name),
+  };
+}
+
+const options = () => ({
+  providers: [{ kind: 'local', options: { root: '/data/resources' } }],
+  schemas: capability.schemas(),
+});
+
+(async () => {
+  // 1) Success: configureResource → registerBatch
+  //    (registerProvider comes first when providerPlugins are configured)
+  const ok = makeStore();
+  console.log(await capability.create(ok, options()).start());
+  // { registered: ['Resource', 'ResourceLocation', 'ResourceBinding'], skipped: [], providerRegistered: [] }
+
+  // 2) configureResource fails: zero schemas registered
+  const cfgFail = makeStore();
+  cfgFail.configureResource = async () => { throw new Error('unknown provider kind'); };
+  try { await capability.create(cfgFail, options()).start(); } catch (e) { console.log(e.message); }
+  console.log(cfgFail.registered.size);            // 0
+
+  // 3) Batch registration fails: the whole list is unregistered, the host error passes through
+  const regFail = makeStore();
+  const hostErr = Object.assign(new Error('host original message'), { code: 'HOST_REG_X' });
+  regFail.registerBatch = () => { throw hostErr; };
+  try { await capability.create(regFail, options()).start(); } catch (e) {
+    console.log(e === hostErr, e.code, e.message); // true HOST_REG_X host original message
+    console.log(e.attempted, e.registered);        // undefined undefined (clean rollback, nothing attached)
+  }
+  console.log(regFail.registered.size);            // 0
+
+  // 4) attempted / registered are attached only when residue remains (code and message untouched)
+  const stuck = makeStore();
+  stuck.registerBatch = () => { throw hostErr; };
+  stuck.unregister = () => { throw new Error('rollback failed'); };
+  try { await capability.create(stuck, options()).start(); } catch (e) {
+    console.log(e.attempted);  // ['Resource', 'ResourceLocation', 'ResourceBinding']
+    console.log(e.registered); // same: still there after rollback
+  }
+})();
+```
+
+Python carries the same semantics (`register_batch` / `configure_resource` / `unregister`):
+
+```python
+import asyncio
+from store_resource_bootstrap import capability
+
+
+class Store:
+    """Minimal host stand-in: register_batch / unregister are optional façades, both provided here."""
+
+    def __init__(self):
+        self.registered = set()
+
+    def has(self, name):
+        return name in self.registered
+
+    async def configure_resource(self, cfg):
+        return {"pool": "stub"}
+
+    def register_batch(self, items):
+        for item in items:
+            self.registered.add(item["defn"]["name"])
+
+    def unregister(self, name):
+        self.registered.discard(name)
+
+
+def options():
+    return {
+        "providers": [{"kind": "local", "options": {"root": "/data/resources"}}],
+        "schemas": capability.schemas(),
+    }
+
+
+async def main():
+    # 1) Success: configure_resource → register_batch
+    #    (register_provider comes first when providerPlugins are configured)
+    ok = Store()
+    print(await capability.create(ok, options()).start())
+    # {'registered': ['Resource', 'ResourceLocation', 'ResourceBinding'], 'skipped': [], 'providerRegistered': []}
+
+    # 2) configure_resource fails: zero schemas registered
+    cfg_fail = Store()
+
+    async def boom(cfg):
+        raise RuntimeError("unknown provider kind")
+
+    cfg_fail.configure_resource = boom
+    try:
+        await capability.create(cfg_fail, options()).start()
+    except RuntimeError as e:
+        print(e)                      # unknown provider kind
+    print(len(cfg_fail.registered))   # 0
+
+    # 3) Batch registration fails: the whole list is unregistered, the host error passes through
+    reg_fail = Store()
+    host_err = RuntimeError("host original message")
+    host_err.code = "HOST_REG_X"
+
+    def fail_batch(items):
+        raise host_err
+
+    reg_fail.register_batch = fail_batch
+    try:
+        await capability.create(reg_fail, options()).start()
+    except RuntimeError as e:
+        print(e is host_err, e.code, str(e))         # True HOST_REG_X host original message
+        print(hasattr(e, "attempted"), hasattr(e, "registered"))  # False False (clean rollback, nothing attached)
+    print(len(reg_fail.registered))   # 0
+
+    # 4) attempted / registered are attached only when residue remains (code and message untouched)
+    stuck = Store()
+    stuck.register_batch = fail_batch
+
+    def fail_unregister(name):
+        raise RuntimeError("rollback failed")
+
+    stuck.unregister = fail_unregister
+    try:
+        await capability.create(stuck, options()).start()
+    except RuntimeError as e:
+        print(e.attempted)   # ['Resource', 'ResourceLocation', 'ResourceBinding']
+        print(e.registered)  # same: still there after rollback
+
+
+asyncio.run(main())
+```
+
 ### Three resolvers, two shapes
 
 | Factory | Returns | Called from | Calls the host |
@@ -85,10 +240,10 @@ Both runtimes throw plain `Error` / `ValueError` with a message naming the offen
 ## Run it
 
 ```bash
-# Node — package name verified against node/package.json 0.3.4
+# Node — package name verified against node/package.json
 npm i store-resource-bootstrap-node
 
-# Python — package name verified against py/pyproject.toml 0.3.4
+# Python — package name verified against py/pyproject.toml
 pip install store-resource-bootstrap-py
 ```
 

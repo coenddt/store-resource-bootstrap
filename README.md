@@ -11,10 +11,12 @@
 - 七个配置键，零宿主导入：`store` 实例作为参数传进来。
 - 没有 DDL、没有 HTTP 路由、没有状态码：插件负责接线，宿主负责存储，皮负责暴露。
 
-| 运行时 | 包 | 版本 | 导入 | 宿主兼容 | 引擎下限 |
+| 运行时 | 包 | 目标版本 | 导入 | 宿主兼容 | 引擎下限 |
 |---|---|---|---|---|---|
-| Node | `store-resource-bootstrap-node` | **0.3.4** | `require('store-resource-bootstrap-node')` | `nodejs-store >= 4.3.0`，可选 peer | Node >= 18 |
-| Python | `store-resource-bootstrap-py` | **0.3.4** | `from store_resource_bootstrap import capability, adapter` | `py-store >= 4.3.0` 兼容下限 | Python >= 3.10 |
+| Node | `store-resource-bootstrap-node` | **0.3.5** | `require('store-resource-bootstrap-node')` | `nodejs-store >= 4.3.0`，可选 peer | Node >= 18 |
+| Python | `store-resource-bootstrap-py` | **0.3.5** | `from store_resource_bootstrap import capability, adapter` | `py-store >= 4.3.0` 兼容下限 | Python >= 3.10 |
+
+> 表内版本为**目标版本**，随本批次统一发布；发布前 registry 上仍是旧线，请从本仓源码安装。
 
 > English: [README.en.md](./README.en.md)
 
@@ -32,7 +34,7 @@
 
 插件做两件事，顺序就是名字的顺序：
 
-1. **能力引导** —— 先把 `providerPlugins` 的工厂注册进宿主，再调用宿主既有的资源门面 `configureResource({ providers, url, sign, schema, fields })`，最后幂等注册**你注入**的 schema 定义（`configureResource` 是唯一会因宿主语义校验失败的一步，放在注册 schema 之前 ⇒ 失败时不留空表）。
+1. **能力引导** —— 先把 `providerPlugins` 的工厂注册进宿主，再调用宿主既有的资源门面 `configureResource({ providers, url, sign, schema, fields })`，最后幂等注册**你注入**的 schema 定义（优先单次 `registerBatch`，失败按整份清单 `unregister` 补偿；`configureResource` 是唯一会因宿主语义校验失败的一步，放在注册 schema 之前 ⇒ 失败时 schema 零注册）。
 2. **接缝适配** —— 产出皮所需的 `download` / `upload` / `uploadResolver` 函数，形状正好是 store-api 既有文件子路由期待的样子。
 
 它**不带权威资源 schema**、**不建表**、**不暴露 HTTP 路由**。这三件事分别属于业务、宿主与皮。
@@ -68,6 +70,159 @@
 
 `opts.fields` 重命名通用代码会碰到的列。它把每张表的**逻辑角色**映射到**物理列** —— 例如 `sha1 → contentHash`、`key → objectKey`、`businessTable → entity`。必填角色必须是非空字符串；可选角色可以是非空字符串或 `null`，`null` 意为「不落这一列」。`_id` 不可映射。只有提供该键时才转发，所以更早的宿主仍收到逐字节兼容的载荷。
 
+### 原子注册与回滚
+
+`start()` 的顺序固定为：`registerProvider`（仅当配置了 `providerPlugins`）→ `configureResource` → schema 注册。
+
+- **`configureResource` 前置保证失败零注册**：它是唯一可能因宿主语义校验失败的一步（宿主整体替换 `_pool`，失败保留旧池）。放在 schema 注册之前，它失败时宿主上不会留下任何新注册的表。
+- **批量优先**：schema 注册优先走宿主的可选门面 `registerBatch`，单次批量提交（构造期校验，任一失败零副作用）。宿主未提供该门面时，自动回落逐条 `register`，不需要配置开关，也不因此报错。
+- **按整份清单补偿**：注册中途失败后，对本次 attempted 的**整份清单**逐名调用 `unregister`（未知 schema 幂等成功）。宿主未提供 `unregister` 时无法补偿，此时如实把残留写进错误，不伪装成成功。
+- **错误契约**：补偿干净时**直接透传宿主原错误对象** —— 对象同一性、`code`、`message` 都不变；只有补偿后确实还有残留时，才在原错误对象上附加 `attempted`（本次尝试清单）与 `registered`（残留清单），主错误码与文案不动。成功路径返回的 `{ registered, skipped, providerRegistered }` 与门面调用顺序不变。
+
+下面这段可直接运行（`node` + 本包，宿主用最小替身）：
+
+```javascript
+const { capability } = require('store-resource-bootstrap-node');
+
+// 最小宿主替身：registerBatch / unregister 是可选门面，这里都提供。
+function makeStore() {
+  const registered = new Set();
+  return {
+    registered,
+    has: (name) => registered.has(name),
+    configureResource: async () => {},
+    registerBatch: (items) => items.forEach(({ defn }) => registered.add(defn.name)),
+    unregister: (name) => registered.delete(name),
+  };
+}
+
+const options = () => ({
+  providers: [{ kind: 'local', options: { root: '/data/resources' } }],
+  schemas: capability.schemas(),
+});
+
+(async () => {
+  // 1) 正常：configureResource → registerBatch
+  //    （配置了 providerPlugins 时，registerProvider 最先）
+  const ok = makeStore();
+  console.log(await capability.create(ok, options()).start());
+  // { registered: ['Resource', 'ResourceLocation', 'ResourceBinding'], skipped: [], providerRegistered: [] }
+
+  // 2) configureResource 失败：schema 零注册
+  const cfgFail = makeStore();
+  cfgFail.configureResource = async () => { throw new Error('provider kind 未知'); };
+  try { await capability.create(cfgFail, options()).start(); } catch (e) { console.log(e.message); }
+  console.log(cfgFail.registered.size);            // 0
+
+  // 3) 批量注册失败：整份清单 unregister 补偿，宿主原错误原样透传
+  const regFail = makeStore();
+  const hostErr = Object.assign(new Error('宿主原文案'), { code: 'HOST_REG_X' });
+  regFail.registerBatch = () => { throw hostErr; };
+  try { await capability.create(regFail, options()).start(); } catch (e) {
+    console.log(e === hostErr, e.code, e.message); // true HOST_REG_X 宿主原文案
+    console.log(e.attempted, e.registered);        // undefined undefined（补偿干净，不附加）
+  }
+  console.log(regFail.registered.size);            // 0
+
+  // 4) 只有补偿后仍有残留，才附加 attempted / registered（主错误码与文案不动）
+  const stuck = makeStore();
+  stuck.registerBatch = () => { throw hostErr; };
+  stuck.unregister = () => { throw new Error('补偿失败'); };
+  try { await capability.create(stuck, options()).start(); } catch (e) {
+    console.log(e.attempted);  // ['Resource', 'ResourceLocation', 'ResourceBinding']
+    console.log(e.registered); // 同上：补偿后仍残留
+  }
+})();
+```
+
+Python 侧同一套语义（门面名换成 `register_batch` / `configure_resource` / `unregister`）：
+
+```python
+import asyncio
+from store_resource_bootstrap import capability
+
+
+class Store:
+    """最小宿主替身：register_batch / unregister 是可选门面，这里都提供。"""
+
+    def __init__(self):
+        self.registered = set()
+
+    def has(self, name):
+        return name in self.registered
+
+    async def configure_resource(self, cfg):
+        return {"pool": "stub"}
+
+    def register_batch(self, items):
+        for item in items:
+            self.registered.add(item["defn"]["name"])
+
+    def unregister(self, name):
+        self.registered.discard(name)
+
+
+def options():
+    return {
+        "providers": [{"kind": "local", "options": {"root": "/data/resources"}}],
+        "schemas": capability.schemas(),
+    }
+
+
+async def main():
+    # 1) 正常：configure_resource → register_batch
+    #    （配置了 providerPlugins 时，register_provider 最先）
+    ok = Store()
+    print(await capability.create(ok, options()).start())
+    # {'registered': ['Resource', 'ResourceLocation', 'ResourceBinding'], 'skipped': [], 'providerRegistered': []}
+
+    # 2) configure_resource 失败：schema 零注册
+    cfg_fail = Store()
+
+    async def boom(cfg):
+        raise RuntimeError("provider kind 未知")
+
+    cfg_fail.configure_resource = boom
+    try:
+        await capability.create(cfg_fail, options()).start()
+    except RuntimeError as e:
+        print(e)                      # provider kind 未知
+    print(len(cfg_fail.registered))   # 0
+
+    # 3) 批量注册失败：整份清单 unregister 补偿，宿主原错误原样透传
+    reg_fail = Store()
+    host_err = RuntimeError("宿主原文案")
+    host_err.code = "HOST_REG_X"
+
+    def fail_batch(items):
+        raise host_err
+
+    reg_fail.register_batch = fail_batch
+    try:
+        await capability.create(reg_fail, options()).start()
+    except RuntimeError as e:
+        print(e is host_err, e.code, str(e))         # True HOST_REG_X 宿主原文案
+        print(hasattr(e, "attempted"), hasattr(e, "registered"))  # False False（补偿干净，不附加）
+    print(len(reg_fail.registered))   # 0
+
+    # 4) 只有补偿后仍有残留，才附加 attempted / registered（主错误码与文案不动）
+    stuck = Store()
+    stuck.register_batch = fail_batch
+
+    def fail_unregister(name):
+        raise RuntimeError("补偿失败")
+
+    stuck.unregister = fail_unregister
+    try:
+        await capability.create(stuck, options()).start()
+    except RuntimeError as e:
+        print(e.attempted)   # ['Resource', 'ResourceLocation', 'ResourceBinding']
+        print(e.registered)  # 同上：补偿后仍残留
+
+
+asyncio.run(main())
+```
+
 ### 三个 resolver，两种形状
 
 | 工厂 | 返回 | 调用方 | 调用宿主 |
@@ -85,10 +240,10 @@
 ## 跑起来
 
 ```bash
-# Node —— 包名经 node/package.json 0.3.4 核对
+# Node —— 包名经 node/package.json 核对
 npm i store-resource-bootstrap-node
 
-# Python —— 包名经 py/pyproject.toml 0.3.4 核对
+# Python —— 包名经 py/pyproject.toml 核对
 pip install store-resource-bootstrap-py
 ```
 
