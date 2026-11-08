@@ -144,14 +144,12 @@ class _Handle:
             except Exception as e:
                 # 注册失败后按整份清单补偿（unregister 对未知 schema 幂等），不静默留下半配置。
                 residual = _rollback_registered(self._store, attempted)
-                err = ValueError(
-                    f"schema 注册失败: [{', '.join(attempted)}]"
-                    f"（残留: [{', '.join(residual)}]）: {e}"
-                )
-                err.code = "SCHEMA_REGISTER_FAILED"
-                err.registered = residual
-                err.attempted = list(attempted)
-                raise err from e
+                # 补偿干净：直接透传宿主原错误，错误码与文案保持原样（下游无需适配）。
+                # 仍有残留：只在原错误上附加 attempted / registered 字段，不改码值与文案。
+                if residual:
+                    e.registered = residual
+                    e.attempted = list(attempted)
+                raise
         return {"registered": attempted, "skipped": skipped, "providerRegistered": provider_registered}
 
     async def reload(self):

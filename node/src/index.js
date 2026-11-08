@@ -217,14 +217,13 @@ function create(store, opts = {}) {
       } catch (e) {
         // 注册失败后按整份清单补偿（unregister 对未知 schema 幂等），不静默留下半配置。
         const residual = rollbackRegistered(store, attempted);
-        const err = new Error(
-          `schema 注册失败: [${attempted.join(', ')}]（残留: [${residual.join(', ')}]）: ${e.message}`,
-        );
-        err.code = 'SCHEMA_REGISTER_FAILED';
-        err.registered = residual;
-        err.attempted = attempted.slice();
-        err.cause = e;
-        throw err;
+        // 补偿干净：直接透传宿主原错误，错误码与文案保持原样（下游无需适配）。
+        // 仍有残留：只在原错误上附加 attempted / registered 字段，不改码值与文案。
+        if (residual.length && e && typeof e === 'object') {
+          e.registered = residual;
+          e.attempted = attempted.slice();
+        }
+        throw e;
       }
     }
     return { registered: attempted, skipped, providerRegistered };
