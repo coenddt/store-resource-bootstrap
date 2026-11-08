@@ -12,6 +12,7 @@ class MockStore:
         # seed 为表名列表（conformance 传入），仅映射为「已注册」集合
         self.registered = {n: True for n in (seed or [])}
         self._batch_failures = 1 if fail_batch else 0
+        self._batch_error = fail_batch if isinstance(fail_batch, BaseException) else RuntimeError("注入失败")
         self._fail_unregister = fail_unregister
         if unregister:
             self.unregister = self._unregister
@@ -42,7 +43,7 @@ class MockStore:
         self.calls.append(("register_batch", [it["defn"]["name"] for it in items]))
         if self._batch_failures > 0:
             self._batch_failures -= 1
-            raise RuntimeError("注入失败")
+            raise self._batch_error
         for it in items:
             self.registered[it["defn"]["name"]] = it["defn"]
 

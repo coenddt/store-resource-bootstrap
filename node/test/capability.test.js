@@ -250,11 +250,11 @@ test('C21 旧宿主（无 registerBatch/unregister）：中途失败整份残留
     return original(defn);
   };
   await assert.rejects(() => handle.start(), (e) => {
-    assert.equal(e.code, 'SCHEMA_REGISTER_FAILED');
-    // 旧宿主没有 unregister：第二张失败，第一张已注册且无法回滚 ⇒ 整份清单如实报为残留
+    // 补偿不可能（旧宿主无 unregister）：原错误原样上抛，只附加残留 / 尝试清单
+    assert.equal(e.message, '注入失败');
+    assert.equal(e.code, undefined, '不得把错误改包成 SCHEMA_REGISTER_FAILED');
     assert.deepEqual(e.attempted, ['PartialA', 'PartialB']);
     assert.deepEqual(e.registered, ['PartialA', 'PartialB']);
-    assert.match(e.message, /残留: \[PartialA, PartialB\]/);
     return true;
   });
   assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [true, false]);
@@ -277,14 +277,25 @@ test('C22 新宿主：单次 registerBatch 原子注册，顺序在 configureRes
   assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [true, true]);
 });
 
-test('C23 批量失败：整份清单补偿后零残留，同一 store 可直接重放成功', async () => {
-  const store = mockStore({}, { batch: true, unregister: true, failBatch: true });
+test('C23 批量失败：整份清单补偿后零残留，原错误原样透传，同一 store 可直接重放成功', async () => {
+  const store = mockStore({}, { batch: true, unregister: true });
+  const hostErr = Object.assign(new Error('宿主原文案'), { code: 'HOST_REG_X' });
+  const originalBatch = store.registerBatch;
+  let failures = 1;
+  store.registerBatch = (items) => {
+    if (failures-- > 0) {
+      store.calls.push(['registerBatch', items.map((it) => it.defn.name)]);
+      throw hostErr;
+    }
+    return originalBatch(items);
+  };
   const handle = capability.create(store, { providers: [{ kind: 'local' }], schemas: PARTIAL_DEFS });
   await assert.rejects(() => handle.start(), (e) => {
-    assert.equal(e.code, 'SCHEMA_REGISTER_FAILED');
-    assert.deepEqual(e.attempted, ['PartialA', 'PartialB']);
-    assert.deepEqual(e.registered, [], '补偿成功时残留必须为空');
-    assert.match(e.message, /残留: \[\]/);
+    assert.equal(e, hostErr, '补偿成功必须原样透传宿主错误对象');
+    assert.equal(e.code, 'HOST_REG_X', '主错误码保持宿主原值');
+    assert.equal(e.message, '宿主原文案', '主错误文案保持宿主原值');
+    assert.equal(e.registered, undefined, '补偿干净时不附加字段');
+    assert.equal(e.attempted, undefined, '补偿干净时不附加字段');
     return true;
   });
   assert.deepEqual(
@@ -299,12 +310,14 @@ test('C23 批量失败：整份清单补偿后零残留，同一 store 可直接
   assert.deepEqual([store.has('PartialA'), store.has('PartialB')], [true, true]);
 });
 
-test('C24 补偿失败：不伪装成功，残留清单如实返回', async () => {
+test('C24 补偿失败：原错误上如实附加残留清单，不改写码值与文案', async () => {
   const store = mockStore({}, { batch: true, unregister: true, failBatch: true, failUnregister: true });
   const handle = capability.create(store, { providers: [{ kind: 'local' }], schemas: PARTIAL_DEFS });
   await assert.rejects(() => handle.start(), (e) => {
+    assert.equal(e.message, '注入失败', '主文案不被改写');
+    assert.equal(e.code, undefined, '不加包装码');
     assert.deepEqual(e.registered, ['PartialA', 'PartialB']);
-    assert.match(e.message, /残留: \[PartialA, PartialB\]/);
+    assert.deepEqual(e.attempted, ['PartialA', 'PartialB']);
     return true;
   });
 });

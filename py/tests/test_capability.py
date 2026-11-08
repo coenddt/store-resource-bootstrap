@@ -293,8 +293,13 @@ def test_schema_register_partial_failure_reports_registered():
         original(defn)
 
     store.register = register
-    with pytest.raises(ValueError, match=r"残留: \[PartialA, PartialB\]"):
+    with pytest.raises(RuntimeError, match="注入失败") as ei:
         run(handle.start())
+    err = ei.value
+    # 补偿不可能（旧宿主无 unregister）：原错误原样上抛，只附加残留 / 尝试清单
+    assert not hasattr(err, "code"), "不得把错误改包成 SCHEMA_REGISTER_FAILED"
+    assert err.registered == ["PartialA", "PartialB"]
+    assert err.attempted == ["PartialA", "PartialB"]
     assert store.has("PartialA") and not store.has("PartialB")
 
 
@@ -318,16 +323,18 @@ def test_schema_register_batch_atomic_and_order():
 
 
 def test_schema_register_batch_failure_rolls_back_and_replays():
-    """批量失败：整份清单补偿后零残留，同一 store 可直接幂等重放成功。"""
-    store = MockStore(batch=True, unregister=True, fail_batch=True)
+    """批量失败：整份清单补偿后零残留，原错误原样透传，同一 store 可幂等重放成功。"""
+    host_err = RuntimeError("宿主原文案")
+    host_err.code = "HOST_REG_X"
+    store = MockStore(batch=True, unregister=True, fail_batch=host_err)
     handle = capability.create(store, _ok_opts(schemas=PARTIAL_DEFS))
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(RuntimeError) as ei:
         run(handle.start())
     err = ei.value
-    assert err.code == "SCHEMA_REGISTER_FAILED"
-    assert err.attempted == ["PartialA", "PartialB"]
-    assert err.registered == []
-    assert "残留: []" in str(err)
+    assert err is host_err, "补偿成功必须原样透传宿主错误对象"
+    assert err.code == "HOST_REG_X"                   # 主错误码保持宿主原值
+    assert str(err) == "宿主原文案"                     # 主错误文案保持宿主原值
+    assert not hasattr(err, "registered") and not hasattr(err, "attempted")
     assert [c[1] for c in store.calls if c[0] == "unregister"] == ["PartialA", "PartialB"]
     assert not store.has("PartialA") and not store.has("PartialB")
 
@@ -338,12 +345,15 @@ def test_schema_register_batch_failure_rolls_back_and_replays():
 
 
 def test_schema_register_rollback_failure_reports_residual():
-    """补偿失败不伪装成功：残留清单如实返回。"""
+    """补偿失败：原错误上如实附加残留清单，不改写码值与文案。"""
     store = MockStore(batch=True, unregister=True, fail_batch=True, fail_unregister=True)
     handle = capability.create(store, _ok_opts(schemas=PARTIAL_DEFS))
-    with pytest.raises(ValueError, match=r"残留: \[PartialA, PartialB\]") as ei:
+    with pytest.raises(RuntimeError, match="注入失败") as ei:
         run(handle.start())
-    assert ei.value.registered == ["PartialA", "PartialB"]
+    err = ei.value
+    assert not hasattr(err, "code")
+    assert err.registered == ["PartialA", "PartialB"]
+    assert err.attempted == ["PartialA", "PartialB"]
 
 
 def test_create_accepts_batch_only_store():
